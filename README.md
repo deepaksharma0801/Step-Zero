@@ -1,4 +1,4 @@
-# Step Zero
+# Step Zero STILL UNDER CONSTRUCTION STAY TUNED
 
 Step Zero is a lightweight MVP for a focus sprint app designed around ADHD and overwhelm. It helps someone dump messy tasks, turn them into tiny next steps, choose one low-friction action, and run short focus sprints without shame-heavy productivity language.
 
