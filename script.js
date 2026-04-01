@@ -618,7 +618,7 @@ function mergeTasks(nextTasks, existingTasks) {
   const uniqueNewTasks = nextTasks.filter(
     (task) => task.title && !existingTitles.has(task.title.toLowerCase())
   );
-  return [...uniqueNewTasks, ...existingTasks];
+  return [...existingTasks, ...uniqueNewTasks];
 }
 
 function ensureFocusedStep() {
@@ -785,17 +785,18 @@ function renderAiPanel() {
 
 function renderTasks() {
   elements.taskList.innerHTML = "";
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
 
-  if (!state.tasks.length) {
+  if (!openTasks.length) {
     elements.taskList.className = "task-list empty-state";
     elements.taskList.innerHTML =
-      "<p>No tasks yet. Brain dump a few things to get your first Step Zero plan.</p>";
+      "<p>No open tasks right now. Add a few new ones whenever you want to keep going.</p>";
     return;
   }
 
   elements.taskList.className = "task-list";
 
-  state.tasks.forEach((task) => {
+  openTasks.forEach((task) => {
     const fragment = elements.taskTemplate.content.cloneNode(true);
     const card = fragment.querySelector(".task-card");
     const category = fragment.querySelector(".task-category");
@@ -807,9 +808,7 @@ function renderTasks() {
 
     category.textContent = task.category;
     title.textContent = task.title;
-    meta.textContent = openStepCount
-      ? `${openStepCount} tiny step${openStepCount === 1 ? "" : "s"} left`
-      : "This task is fully cleared.";
+    meta.textContent = `${openStepCount} tiny step${openStepCount === 1 ? "" : "s"} left`;
 
     if (task.id === state.focus.taskId) {
       card.classList.add("is-focused");
