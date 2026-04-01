@@ -8,8 +8,8 @@ const ENV_PATH = path.join(ROOT, ".env");
 
 loadDotEnv(ENV_PATH);
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -30,8 +30,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/health") {
       sendJson(res, 200, {
         ok: true,
-        aiAvailable: Boolean(OPENAI_API_KEY),
-        model: OPENAI_MODEL,
+        aiAvailable: Boolean(GEMINI_API_KEY),
+        model: GEMINI_MODEL,
+        provider: "gemini",
       });
       return;
     }
@@ -60,13 +61,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Step Zero running at http://localhost:${PORT}`);
-  if (!OPENAI_API_KEY) {
-    console.log("AI is offline: set OPENAI_API_KEY in .env to enable server-side guidance.");
+  if (!GEMINI_API_KEY) {
+    console.log("AI is offline: set GEMINI_API_KEY in .env to enable Gemini guidance.");
   }
 });
 
 async function handlePlan(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!GEMINI_API_KEY) {
     sendJson(res, 503, { error: "AI is not configured on the server." });
     return;
   }
@@ -140,7 +141,7 @@ async function handlePlan(req, res) {
 }
 
 async function handleGuidance(req, res) {
-  if (!OPENAI_API_KEY) {
+  if (!GEMINI_API_KEY) {
     sendJson(res, 503, { error: "AI is not configured on the server." });
     return;
   }
@@ -228,78 +229,77 @@ function serveStatic(requestPath, res) {
 }
 
 async function requestAIJson({ schemaName, schema, userPrompt }) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      GEMINI_MODEL
+    )}:generateContent`,
+    {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "x-goog-api-key": GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text: "You are a structured JSON planner for Step Zero. Follow the schema exactly and do not add extra keys.",
-            },
-          ],
-        },
+      system_instruction: {
+        parts: [
+          {
+            text: `You are a structured JSON planner for Step Zero. Follow the ${schemaName} schema exactly and do not add extra keys.`,
+          },
+        ],
+      },
+      contents: [
         {
           role: "user",
-          content: [
+          parts: [
             {
-              type: "input_text",
               text: userPrompt,
             },
           ],
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: schemaName,
-          strict: true,
-          schema,
-        },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: schema,
       },
     }),
-  });
+  }
+  );
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error?.message || "OpenAI request failed.");
+    throw new Error(data.error?.message || "Gemini request failed.");
   }
 
-  const refusal = extractResponseRefusal(data);
-  if (refusal) {
-    throw new Error(refusal);
+  const promptBlock = data.promptFeedback?.blockReason;
+  if (promptBlock) {
+    throw new Error(`Gemini blocked the request: ${promptBlock}.`);
   }
 
-  const text = extractResponseText(data);
+  const candidate = Array.isArray(data.candidates) ? data.candidates[0] : null;
+  const candidateBlock = candidate?.finishReason;
+  if (candidateBlock && candidateBlock !== "STOP") {
+    const detail = candidate?.finishMessage ? ` ${candidate.finishMessage}` : "";
+    throw new Error(`Gemini stopped early: ${candidateBlock}.${detail}`.trim());
+  }
+
+  const text = extractGeminiText(data);
   if (!text) {
-    throw new Error("OpenAI returned an empty response.");
+    throw new Error("Gemini returned an empty response.");
   }
 
-  return JSON.parse(text);
+  return parseGeminiJson(text);
 }
 
-function extractResponseText(data) {
-  if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text;
-  }
-
-  const outputs = Array.isArray(data.output) ? data.output : [];
+function extractGeminiText(data) {
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
   const parts = [];
 
-  outputs.forEach((item) => {
-    const content = Array.isArray(item.content) ? item.content : [];
-    content.forEach((entry) => {
-      if (typeof entry.text === "string") {
-        parts.push(entry.text);
-      } else if (typeof entry.value === "string") {
-        parts.push(entry.value);
+  candidates.forEach((candidate) => {
+    const content = candidate?.content;
+    const entries = Array.isArray(content?.parts) ? content.parts : [];
+    entries.forEach((entry) => {
+      if (typeof entry?.text === "string" && entry.text.trim()) {
+        parts.push(entry.text.trim());
       }
     });
   });
@@ -307,20 +307,16 @@ function extractResponseText(data) {
   return parts.join("").trim();
 }
 
-function extractResponseRefusal(data) {
-  const outputs = Array.isArray(data.output) ? data.output : [];
-  const refusals = [];
-
-  outputs.forEach((item) => {
-    const content = Array.isArray(item.content) ? item.content : [];
-    content.forEach((entry) => {
-      if (typeof entry.refusal === "string" && entry.refusal.trim()) {
-        refusals.push(entry.refusal.trim());
-      }
-    });
-  });
-
-  return refusals.join(" ").trim();
+function parseGeminiJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const fenced = text.match(/```json\s*([\s\S]+?)```/i) || text.match(/```\s*([\s\S]+?)```/);
+    if (fenced?.[1]) {
+      return JSON.parse(fenced[1].trim());
+    }
+    throw new Error("Gemini returned invalid JSON.");
+  }
 }
 
 function normalizeEnergy(value) {

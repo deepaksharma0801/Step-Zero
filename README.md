@@ -15,7 +15,7 @@ Step Zero is a lightweight MVP for a focus sprint app designed around ADHD and o
 This version should be run through the local app server so AI can stay on the backend.
 
 1. Copy [.env.example](/Users/snadimi3/Documents/APP%20idea/.env.example) to `.env`
-2. Put your OpenAI key in `.env`
+2. Create a Gemini API key in Google AI Studio and put it in `.env`
 3. Start the server:
 
 ```bash
@@ -35,6 +35,7 @@ After the server is configured:
 ## Notes
 
 - Data is stored locally in the browser with `localStorage`
-- OpenAI requests are proxied through [server.js](/Users/snadimi3/Documents/APP%20idea/server.js), so the key stays on the server
-- The default server model is `gpt-5-mini`, configurable through `.env`
+- Gemini requests are proxied through [server.js](/Users/snadimi3/Documents/APP%20idea/server.js), so the key stays on the server
+- The default server model is `gemini-2.5-flash-lite`, configurable through `.env`
+- Gemini free tier keys come from Google AI Studio: [ai.google.dev/gemini-api/docs/api-key](https://ai.google.dev/gemini-api/docs/api-key)
 - If AI is unavailable, the app falls back to its built-in local planning logic
