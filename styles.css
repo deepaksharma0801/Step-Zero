@@ -404,6 +404,12 @@ textarea:focus {
   color: var(--ink);
 }
 
+.draft-item-status {
+  font-size: 0.84rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .draft-remove {
   white-space: nowrap;
 }

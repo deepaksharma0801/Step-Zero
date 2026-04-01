@@ -801,21 +801,42 @@ function renderAiPanel() {
 }
 
 function renderDraftPreview() {
-  const entries = splitEntries(state.draftText);
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
+  const existingTitles = new Set(openTasks.map((task) => task.title.toLowerCase()));
+  const pendingEntries = splitEntries(state.draftText).filter(
+    (entry) => !existingTitles.has(tidySentence(entry).toLowerCase())
+  );
+  const totalCount = openTasks.length + pendingEntries.length;
 
-  elements.draftCount.textContent = `${entries.length} task${entries.length === 1 ? "" : "s"} ready`;
+  elements.draftCount.textContent = `${totalCount} task${totalCount === 1 ? "" : "s"} active`;
 
-  if (!entries.length) {
+  if (!totalCount) {
     elements.draftPreview.className = "draft-preview empty-state";
     elements.draftPreview.innerHTML =
-      "<p>As you add tasks, they will collect here before you send them into the full board.</p>";
+      "<p>As you add tasks, they will stay here as your running list until they are completed.</p>";
     return;
   }
 
   elements.draftPreview.className = "draft-preview";
   elements.draftPreview.innerHTML = "";
 
-  entries.forEach((entry, index) => {
+  openTasks.forEach((task) => {
+    const row = document.createElement("div");
+    row.className = "draft-item";
+
+    const text = document.createElement("p");
+    text.className = "draft-item-text";
+    text.textContent = task.title;
+
+    const status = document.createElement("span");
+    status.className = "draft-item-status";
+    status.textContent = `${getOpenSteps(task).length} step${getOpenSteps(task).length === 1 ? "" : "s"} left`;
+
+    row.append(text, status);
+    elements.draftPreview.append(row);
+  });
+
+  pendingEntries.forEach((entry, index) => {
     const row = document.createElement("div");
     row.className = "draft-item";
 
