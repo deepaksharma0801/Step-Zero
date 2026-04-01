@@ -10,6 +10,9 @@ loadDotEnv(ENV_PATH);
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS || 20);
+const rateLimitStore = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -38,11 +41,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/plan") {
+      if (!enforceRateLimit(req, res)) {
+        return;
+      }
       await handlePlan(req, res);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/guidance") {
+      if (!enforceRateLimit(req, res)) {
+        return;
+      }
       await handleGuidance(req, res);
       return;
     }
@@ -225,6 +234,56 @@ function serveStatic(requestPath, res) {
       "Cache-Control": "no-store",
     });
     res.end(content);
+  });
+}
+
+function enforceRateLimit(req, res) {
+  const now = Date.now();
+  const ip = getClientIp(req);
+  const entry = rateLimitStore.get(ip);
+
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitStore.set(ip, { count: 1, windowStart: now });
+    pruneRateLimitStore(now);
+    return true;
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((entry.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000)
+    );
+    res.writeHead(429, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": String(retryAfterSeconds),
+    });
+    res.end(
+      JSON.stringify({
+        error: "Too many AI requests right now. Please pause for a minute and try again.",
+      })
+    );
+    return false;
+  }
+
+  entry.count += 1;
+  return true;
+}
+
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0].trim();
+  }
+
+  return req.socket.remoteAddress || "unknown";
+}
+
+function pruneRateLimitStore(now) {
+  rateLimitStore.forEach((value, key) => {
+    if (now - value.windowStart >= RATE_LIMIT_WINDOW_MS) {
+      rateLimitStore.delete(key);
+    }
   });
 }
 
