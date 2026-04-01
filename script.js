@@ -1,4 +1,4 @@
-const STORAGE_KEY = "step-zero-state-v1";
+const STORAGE_KEY = "step-zero-state-v3";
 const DEFAULT_DURATION = 10;
 const DEMO_TEXT = `finish pitch deck
 email Sarah about launch copy
@@ -21,6 +21,16 @@ const state = {
     remainingSeconds: DEFAULT_DURATION * 60,
     intervalId: null,
     isRunning: false,
+  },
+  ai: {
+    available: false,
+    model: null,
+    statusText: "Step Zero is checking whether the AI guide is ready.",
+    coachMessage: "The AI coach will guide your next move here when it is ready.",
+    insight: "Your patterns and gentle nudges will show up here.",
+    guidanceReason: "",
+    isLoading: false,
+    mode: "fallback",
   },
 };
 
@@ -53,66 +63,90 @@ const elements = {
   openLoops: document.querySelector("#open-loops"),
   historyLog: document.querySelector("#history-log"),
   taskTemplate: document.querySelector("#task-card-template"),
+  aiStatusCopy: document.querySelector("#ai-status-copy"),
+  coachMessage: document.querySelector("#coach-message"),
+  coachInsight: document.querySelector("#coach-insight"),
 };
 
 function init() {
   hydrateState();
   bindEvents();
   render();
+  void checkAIAvailability();
 }
 
 function hydrateState() {
   const saved = localStorage.getItem(STORAGE_KEY);
 
-  if (!saved) {
-    updateTimerDisplay();
-    return;
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed.tasks)) {
+        state.tasks = parsed.tasks;
+      }
+      if (Array.isArray(parsed.history)) {
+        state.history = parsed.history;
+      }
+      if (parsed.preferences?.energy) {
+        state.preferences.energy = parsed.preferences.energy;
+      }
+      if (parsed.focus) {
+        state.focus = {
+          taskId: parsed.focus.taskId ?? null,
+          stepId: parsed.focus.stepId ?? null,
+        };
+      }
+      if (parsed.ai) {
+        state.ai = {
+          ...state.ai,
+          coachMessage: parsed.ai.coachMessage || state.ai.coachMessage,
+          insight: parsed.ai.insight || state.ai.insight,
+          guidanceReason: parsed.ai.guidanceReason || "",
+        };
+      }
+    } catch (error) {
+      console.warn("Could not restore Step Zero state.", error);
+    }
   }
 
-  try {
-    const parsed = JSON.parse(saved);
-    if (Array.isArray(parsed.tasks)) {
-      state.tasks = parsed.tasks;
-    }
-    if (Array.isArray(parsed.history)) {
-      state.history = parsed.history;
-    }
-    if (parsed.preferences?.energy) {
-      state.preferences.energy = parsed.preferences.energy;
-    }
-    if (parsed.focus) {
-      state.focus = {
-        taskId: parsed.focus.taskId ?? null,
-        stepId: parsed.focus.stepId ?? null,
-      };
-    }
-  } catch (error) {
-    console.warn("Could not restore Step Zero state.", error);
-  }
-
-  syncTimerSelections();
   updateTimerDisplay();
+  syncEnergySelections();
+  syncTimerSelections();
 }
 
 function bindEvents() {
-  elements.generatePlan.addEventListener("click", handleGeneratePlan);
-  elements.loadDemo.addEventListener("click", handleLoadDemo);
+  elements.generatePlan.addEventListener("click", () => {
+    void handleGeneratePlan();
+  });
+  elements.loadDemo.addEventListener("click", () => {
+    elements.brainDump.value = DEMO_TEXT;
+    void handleGeneratePlan();
+  });
   elements.clearAll.addEventListener("click", handleClearAll);
-  elements.pickNextStep.addEventListener("click", handlePickNextStep);
+  elements.pickNextStep.addEventListener("click", () => {
+    void handlePickNextStep();
+  });
   elements.startTimer.addEventListener("click", handleStartTimer);
   elements.pauseTimer.addEventListener("click", handlePauseTimer);
   elements.resetTimer.addEventListener("click", handleResetTimer);
   elements.continueSprint.addEventListener("click", handleContinueSprint);
   elements.takeBreak.addEventListener("click", handleTakeBreak);
-  elements.switchTask.addEventListener("click", handleSwitchTask);
+  elements.switchTask.addEventListener("click", () => {
+    void handleSwitchTask();
+  });
   elements.doneForNow.addEventListener("click", handleDoneForNow);
 
   elements.energyOptions.forEach((button) => {
     button.addEventListener("click", () => {
       state.preferences.energy = button.dataset.energy;
       syncEnergySelections();
+
+      if (canUseAI()) {
+        state.ai.statusText = `AI guide ready on ${state.ai.model}. Refresh guidance whenever you want a new read.`;
+      }
+
       saveState();
-      renderSuggestion();
+      render();
     });
   });
 
@@ -127,37 +161,84 @@ function bindEvents() {
   });
 }
 
-function handleGeneratePlan() {
+async function checkAIAvailability() {
+  try {
+    const response = await fetch("/api/health");
+    const data = await response.json();
+
+    state.ai.available = Boolean(data.aiAvailable);
+    state.ai.model = data.model || null;
+    state.ai.mode = state.ai.available ? "live" : "fallback";
+    state.ai.statusText = state.ai.available
+      ? `AI guide ready on ${state.ai.model}. Users can start immediately.`
+      : "AI guide is offline right now. Step Zero is using built-in support.";
+
+    if (state.ai.available && state.ai.coachMessage.startsWith("The AI coach will")) {
+      state.ai.coachMessage = "AI is ready. Drop in a messy list and Step Zero will help turn it into motion.";
+      state.ai.insight = "When the AI guide is online, you can skip setup and go straight into the work.";
+    }
+  } catch (error) {
+    state.ai.available = false;
+    state.ai.model = null;
+    state.ai.mode = "fallback";
+    state.ai.statusText = "The app server is not connected, so AI guidance is unavailable right now.";
+  }
+
+  saveState();
+  render();
+}
+
+async function handleGeneratePlan() {
+  if (state.ai.isLoading) {
+    return;
+  }
+
   const rawText = elements.brainDump.value.trim();
   if (!rawText) {
     elements.brainDump.focus();
     return;
   }
 
-  const entries = splitEntries(rawText);
-  const nextTasks = entries.map(createTaskFromEntry);
-  state.tasks = mergeTasks(nextTasks, state.tasks);
-  elements.brainDump.value = "";
+  let nextTasks;
+  let usedAI = false;
 
-  if (!getFocusedStep()) {
-    const firstOpenTask = state.tasks.find((task) => !isTaskDone(task));
-    if (firstOpenTask) {
-      const firstOpenStep = getOpenSteps(firstOpenTask)[0];
-      if (firstOpenStep) {
-        state.focus.taskId = firstOpenTask.id;
-        state.focus.stepId = firstOpenStep.id;
-      }
+  if (canUseAI()) {
+    try {
+      setAiLoading("AI is turning that swirl into calmer next steps...");
+      const plan = await fetchJSON("/api/plan", {
+        brainDump: rawText,
+        energy: state.preferences.energy,
+      });
+      nextTasks = plan.tasks.map(createTaskFromAiTask);
+      usedAI = true;
+      state.ai.coachMessage =
+        plan.coachMessage || "Your plan is ready. Start with the lightest visible move.";
+      state.ai.insight =
+        plan.insight || "The fastest way forward is usually a smaller first step, not a bigger push.";
+      state.ai.guidanceReason = "";
+      state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
+      state.ai.isLoading = false;
+      state.ai.mode = "live";
+    } catch (error) {
+      console.error(error);
+      setAiFallback("AI hit a snag while planning, so Step Zero used its built-in breakdown instead.");
     }
   }
 
-  recordHistory("reset", "Built a fresh Step Zero plan.");
+  if (!usedAI) {
+    nextTasks = splitEntries(rawText).map(createTaskFromEntry);
+  }
+
+  state.tasks = mergeTasks(nextTasks, state.tasks);
+  elements.brainDump.value = "";
+  ensureFocusedStep();
+
+  recordHistory(
+    "reset",
+    usedAI ? "Built an AI-guided Step Zero plan." : "Built a fresh Step Zero plan."
+  );
   saveState();
   render();
-}
-
-function handleLoadDemo() {
-  elements.brainDump.value = DEMO_TEXT;
-  handleGeneratePlan();
 }
 
 function handleClearAll() {
@@ -167,38 +248,49 @@ function handleClearAll() {
   state.focus = { taskId: null, stepId: null };
   state.timer.selectedDuration = DEFAULT_DURATION;
   state.timer.remainingSeconds = DEFAULT_DURATION * 60;
+  state.ai.guidanceReason = "";
+  state.ai.coachMessage = canUseAI()
+    ? "AI is ready when you want a fresh plan."
+    : "Step Zero is still helpful without AI, and it will keep things moving.";
+  state.ai.insight = canUseAI()
+    ? "A clean slate still counts as progress when you are restarting on purpose."
+    : "Even without AI, the smallest visible next move is usually the right restart.";
   elements.brainDump.value = "";
   syncTimerSelections();
   saveState();
   render();
 }
 
-function handlePickNextStep() {
-  const suggestion = getSuggestedStep();
-  if (!suggestion) {
+async function handlePickNextStep() {
+  if (state.ai.isLoading) {
+    return;
+  }
+
+  if (!state.tasks.length) {
     renderSuggestion();
     return;
   }
 
-  state.focus.taskId = suggestion.task.id;
-  state.focus.stepId = suggestion.step.id;
-  recordHistory(
-    "reset",
-    `Chose a fresh starting point: ${suggestion.step.title}.`
-  );
-  saveState();
-  render();
+  if (canUseAI()) {
+    await refreshAIGuidance("manual_refresh");
+    return;
+  }
+
+  applyFallbackSuggestion();
+}
+
+async function handleSwitchTask() {
+  elements.sprintComplete.classList.add("hidden");
+  await handlePickNextStep();
+  renderTimerTarget();
 }
 
 function handleStartTimer() {
-  const focusedStep = getFocusedStep();
-  if (!focusedStep) {
-    const suggestion = getSuggestedStep();
-    if (suggestion) {
-      state.focus.taskId = suggestion.task.id;
-      state.focus.stepId = suggestion.step.id;
-      renderSuggestion();
-      renderTasks();
+  if (!getFocusedStep()) {
+    if (canUseAI()) {
+      void refreshAIGuidance("timer_start");
+    } else {
+      applyFallbackSuggestion();
     }
   }
 
@@ -253,12 +345,6 @@ function handleTakeBreak() {
   renderTimerStatus("Break mode. Five easy minutes.");
 }
 
-function handleSwitchTask() {
-  elements.sprintComplete.classList.add("hidden");
-  handlePickNextStep();
-  renderTimerTarget();
-}
-
 function handleDoneForNow() {
   stopTimer();
   elements.sprintComplete.classList.add("hidden");
@@ -267,16 +353,94 @@ function handleDoneForNow() {
   renderTimerStatus("You can come back later. Counts still count.");
 }
 
-function splitEntries(rawText) {
-  return rawText
-    .split(/\n|,|;/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+async function refreshAIGuidance(reason) {
+  if (state.ai.isLoading) {
+    return;
+  }
+
+  if (!canUseAI() || !state.tasks.length) {
+    applyFallbackSuggestion();
+    return;
+  }
+
+  try {
+    setAiLoading("AI is reading your board and picking the kindest next move...");
+    const guidance = await fetchJSON("/api/guidance", {
+      reason,
+      energy: state.preferences.energy,
+      focus: state.focus,
+      history: state.history.slice(0, 6),
+      tasks: state.tasks
+        .filter((task) => !isTaskDone(task))
+        .map((task) => ({
+          id: task.id,
+          title: task.title,
+          category: task.category,
+          steps: task.steps
+            .filter((step) => !step.done)
+            .map((step) => ({
+              id: step.id,
+              title: step.title,
+              effort: step.effort,
+              minutes: step.minutes,
+            })),
+        })),
+    });
+    applyAiGuidance(guidance);
+    saveState();
+    render();
+  } catch (error) {
+    console.error(error);
+    setAiFallback("AI guidance was unavailable, so Step Zero switched back to built-in support.");
+    applyFallbackSuggestion();
+  }
+}
+
+function applyFallbackSuggestion() {
+  const suggestion = getSuggestedStep();
+  if (!suggestion) {
+    renderSuggestion();
+    return;
+  }
+
+  state.focus.taskId = suggestion.task.id;
+  state.focus.stepId = suggestion.step.id;
+  state.ai.guidanceReason = buildSuggestionReason(suggestion.step);
+  state.ai.coachMessage = buildFallbackCoachMessage(suggestion);
+  state.ai.insight = buildFallbackInsight();
+  state.ai.statusText = canUseAI()
+    ? `AI guide ready on ${state.ai.model}.`
+    : "AI guide is offline right now. Step Zero is using built-in support.";
+
+  recordHistory("reset", `Chose a fresh starting point: ${suggestion.step.title}.`);
+  saveState();
+  render();
+}
+
+function applyAiGuidance(guidance) {
+  const task = state.tasks.find((entry) => entry.id === guidance.taskId);
+  const step = task?.steps.find((entry) => entry.id === guidance.stepId && !entry.done);
+
+  if (!task || !step) {
+    applyFallbackSuggestion();
+    return;
+  }
+
+  state.focus.taskId = task.id;
+  state.focus.stepId = step.id;
+  state.ai.guidanceReason = guidance.reason;
+  state.ai.coachMessage = guidance.coachMessage;
+  state.ai.insight = guidance.insight;
+  state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
+  state.ai.mode = "live";
+  state.ai.isLoading = false;
+
+  recordHistory("reset", `AI suggested: ${step.title}.`, task.title);
 }
 
 function createTaskFromEntry(entry) {
   const normalized = tidySentence(entry);
-  const breakdown = buildBreakdown(normalized);
+  const breakdown = buildFallbackBreakdown(normalized);
 
   return {
     id: crypto.randomUUID(),
@@ -292,7 +456,35 @@ function createTaskFromEntry(entry) {
   };
 }
 
-function buildBreakdown(title) {
+function createTaskFromAiTask(task) {
+  const normalizedTitle = tidySentence(task.title || "Untitled task");
+  const fallback = buildFallbackBreakdown(normalizedTitle);
+  const aiSteps = Array.isArray(task.steps) && task.steps.length ? task.steps : fallback.steps;
+
+  return {
+    id: crypto.randomUUID(),
+    title: normalizedTitle,
+    category: tidySentence(task.category || "General"),
+    createdAt: new Date().toISOString(),
+    steps: aiSteps.slice(0, 4).map((step) => ({
+      id: crypto.randomUUID(),
+      title: tidySentence(step.title || "Start with the smallest visible move"),
+      effort: normalizeEffort(step.effort),
+      minutes: normalizeMinutes(step.minutes),
+      done: false,
+      completedAt: null,
+    })),
+  };
+}
+
+function splitEntries(rawText) {
+  return rawText
+    .split(/\n|,|;/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function buildFallbackBreakdown(title) {
   const lower = title.toLowerCase();
 
   if (matches(lower, ["email", "reply", "message"])) {
@@ -321,7 +513,7 @@ function buildBreakdown(title) {
     return {
       category: "Creative Work",
       steps: [
-        makeStep("Open the file and rename today&apos;s version.", "low", 2),
+        makeStep("Open the file and rename today's version.", "low", 2),
         makeStep("Write the headline or title slide first.", "medium", 5),
         makeStep("Draft three bullets for the next most important slide.", "medium", 8),
       ],
@@ -394,11 +586,7 @@ function buildBreakdown(title) {
 }
 
 function makeStep(title, effort, minutes) {
-  return {
-    title,
-    effort,
-    minutes,
-  };
+  return { title, effort, minutes };
 }
 
 function matches(text, words) {
@@ -406,14 +594,49 @@ function matches(text, words) {
 }
 
 function tidySentence(text) {
-  const cleaned = text.replace(/\s+/g, " ").trim();
+  const cleaned = String(text).replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "";
+  }
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function normalizeEffort(effort) {
+  return ["low", "medium", "high"].includes(effort) ? effort : "medium";
+}
+
+function normalizeMinutes(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value)) {
+    return 5;
+  }
+  return Math.min(30, Math.max(1, Math.round(value)));
 }
 
 function mergeTasks(nextTasks, existingTasks) {
   const existingTitles = new Set(existingTasks.map((task) => task.title.toLowerCase()));
-  const uniqueNewTasks = nextTasks.filter((task) => !existingTitles.has(task.title.toLowerCase()));
+  const uniqueNewTasks = nextTasks.filter(
+    (task) => task.title && !existingTitles.has(task.title.toLowerCase())
+  );
   return [...uniqueNewTasks, ...existingTasks];
+}
+
+function ensureFocusedStep() {
+  const focusedStep = getFocusedStep();
+  if (focusedStep) {
+    return;
+  }
+
+  const firstOpenTask = state.tasks.find((task) => !isTaskDone(task));
+  if (!firstOpenTask) {
+    state.focus.taskId = null;
+    state.focus.stepId = null;
+    return;
+  }
+
+  const firstOpenStep = getOpenSteps(firstOpenTask)[0];
+  state.focus.taskId = firstOpenTask.id;
+  state.focus.stepId = firstOpenStep?.id ?? null;
 }
 
 function getOpenSteps(task) {
@@ -433,6 +656,7 @@ function getFocusedStep() {
   if (!task) {
     return null;
   }
+
   return task.steps.find((step) => step.id === state.focus.stepId && !step.done) ?? null;
 }
 
@@ -462,13 +686,29 @@ function getSuggestedStep() {
   return candidates[0] ?? null;
 }
 
-function scoreStep(step, index, targetEnergyScore, isFocusedTask) {
-  const effortScore = {
+function getSuggestedAlternatives() {
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
+  const targetEnergyScore = {
     low: 1,
     medium: 2,
     high: 3,
-  }[step.effort];
+  }[state.preferences.energy];
 
+  return openTasks
+    .flatMap((task) =>
+      task.steps
+        .filter((step) => !step.done)
+        .map((step, index) => ({
+          task,
+          step,
+          score: scoreStep(step, index, targetEnergyScore, task.id === state.focus.taskId),
+        }))
+    )
+    .sort((a, b) => a.score - b.score);
+}
+
+function scoreStep(step, index, targetEnergyScore, isFocusedTask) {
+  const effortScore = { low: 1, medium: 2, high: 3 }[step.effort];
   const energyDistance = Math.abs(effortScore - targetEnergyScore) * 3;
   const orderBias = index * 2;
   const minuteBias = Math.min(step.minutes, 12);
@@ -503,13 +743,13 @@ function toggleStep(taskId, stepId) {
     } else {
       state.focus.stepId = null;
       state.focus.taskId = null;
-
-      const fallbackSuggestion = getSuggestedStep();
-      if (fallbackSuggestion) {
-        state.focus.taskId = fallbackSuggestion.task.id;
-        state.focus.stepId = fallbackSuggestion.step.id;
-      }
+      ensureFocusedStep();
     }
+  }
+
+  if (step.done) {
+    state.ai.coachMessage = buildProgressCoachMessage(step.title);
+    state.ai.insight = buildProgressInsight(task.title);
   }
 
   saveState();
@@ -526,6 +766,7 @@ function setFocus(taskId, stepId) {
 function render() {
   syncEnergySelections();
   syncTimerSelections();
+  renderAiPanel();
   renderTasks();
   renderSuggestion();
   renderTimerTarget();
@@ -533,6 +774,13 @@ function render() {
   renderHistory();
   renderHeaderStats();
   updateTimerDisplay();
+  toggleBusyState();
+}
+
+function renderAiPanel() {
+  elements.aiStatusCopy.textContent = state.ai.statusText;
+  elements.coachMessage.textContent = state.ai.coachMessage;
+  elements.coachInsight.textContent = state.ai.insight;
 }
 
 function renderTasks() {
@@ -592,7 +840,7 @@ function renderTasks() {
 
       const stepTitle = document.createElement("span");
       stepTitle.className = "step-title";
-      stepTitle.textContent = decodeHtml(step.title);
+      stepTitle.textContent = step.title;
 
       const detail = document.createElement("span");
       detail.className = "step-detail";
@@ -628,22 +876,30 @@ function renderSuggestion() {
     return;
   }
 
-  elements.suggestionCard.className = "suggestion-card";
-
   const isFocused =
     suggestion.task.id === state.focus.taskId && suggestion.step.id === state.focus.stepId;
-  const label = isFocused ? "Selected next step" : "Suggested next step";
+  const label = state.ai.mode === "live" && state.ai.guidanceReason
+    ? "AI-picked next step"
+    : isFocused
+      ? "Selected next step"
+      : "Suggested next step";
+  const reason = isFocused && state.ai.guidanceReason
+    ? state.ai.guidanceReason
+    : buildSuggestionReason(suggestion.step);
 
+  elements.suggestionCard.className = "suggestion-card";
   elements.suggestionCard.innerHTML = `
     <p class="suggestion-label">${label}</p>
-    <h3 class="suggestion-step">${decodeHtml(suggestion.step.title)}</h3>
-    <p class="suggestion-task">From: ${suggestion.task.title}</p>
-    <p class="suggestion-reason">${buildSuggestionReason(suggestion.step)}</p>
+    <h3 class="suggestion-step">${escapeHtml(suggestion.step.title)}</h3>
+    <p class="suggestion-task">From: ${escapeHtml(suggestion.task.title)}</p>
+    <p class="suggestion-reason">${escapeHtml(reason)}</p>
     <div class="suggestion-actions">
       <button class="button button-primary" id="suggestion-focus">${
         isFocused ? "Already selected" : "Focus this step"
       }</button>
-      <button class="button button-secondary" id="suggestion-refresh">Give me another option</button>
+      <button class="button button-ghost" id="suggestion-refresh">${
+        canUseAI() ? "Ask AI again" : "Give me another option"
+      }</button>
     </div>
   `;
 
@@ -652,12 +908,18 @@ function renderSuggestion() {
 
   focusButton.disabled = isFocused;
   focusButton.addEventListener("click", () => setFocus(suggestion.task.id, suggestion.step.id));
-  refreshButton.addEventListener("click", () => cycleSuggestion(suggestion.step.id));
+  refreshButton.addEventListener("click", () => {
+    if (canUseAI()) {
+      void handlePickNextStep();
+      return;
+    }
+
+    cycleSuggestion(suggestion.step.id);
+  });
 }
 
 function cycleSuggestion(currentStepId) {
-  const suggestion = getSuggestedAlternatives()
-    .find((candidate) => candidate.step.id !== currentStepId);
+  const suggestion = getSuggestedAlternatives().find((candidate) => candidate.step.id !== currentStepId);
 
   if (!suggestion) {
     return;
@@ -665,29 +927,11 @@ function cycleSuggestion(currentStepId) {
 
   state.focus.taskId = suggestion.task.id;
   state.focus.stepId = suggestion.step.id;
+  state.ai.guidanceReason = buildSuggestionReason(suggestion.step);
+  state.ai.coachMessage = buildFallbackCoachMessage(suggestion);
+  state.ai.insight = buildFallbackInsight();
   saveState();
   render();
-}
-
-function getSuggestedAlternatives() {
-  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
-  const targetEnergyScore = {
-    low: 1,
-    medium: 2,
-    high: 3,
-  }[state.preferences.energy];
-
-  return openTasks
-    .flatMap((task) =>
-      task.steps
-        .filter((step) => !step.done)
-        .map((step, index) => ({
-          task,
-          step,
-          score: scoreStep(step, index, targetEnergyScore, task.id === state.focus.taskId),
-        }))
-    )
-    .sort((a, b) => a.score - b.score);
 }
 
 function buildSuggestionReason(step) {
@@ -700,6 +944,22 @@ function buildSuggestionReason(step) {
   return `This is a ${energyCopy} move that should take about ${step.minutes} minutes.`;
 }
 
+function buildFallbackCoachMessage(suggestion) {
+  return `Start with "${suggestion.step.title}" and stop after a tiny visible win. You do not need to finish the whole task to count this as progress.`;
+}
+
+function buildFallbackInsight() {
+  return `You are currently set to ${state.preferences.energy} energy, so Step Zero is leaning toward lighter, shorter moves first.`;
+}
+
+function buildProgressCoachMessage(stepTitle) {
+  return `Nice. "${stepTitle}" is done, which means your next restart will be easier than the last one.`;
+}
+
+function buildProgressInsight(taskTitle) {
+  return `Progress tends to come from reducing friction on "${taskTitle}", not from pushing harder all at once.`;
+}
+
 function renderTimerTarget() {
   const task = getFocusedTask();
   const step = getFocusedStep();
@@ -709,7 +969,7 @@ function renderTimerTarget() {
     return;
   }
 
-  elements.timerTarget.textContent = `Suggested focus: ${decodeHtml(step.title)} (${task.title})`;
+  elements.timerTarget.textContent = `Suggested focus: ${step.title} (${task.title})`;
 }
 
 function renderTimerStatus(customText) {
@@ -729,7 +989,8 @@ function renderTimerStatus(customText) {
 function updateTimerDisplay() {
   const minutes = Math.floor(state.timer.remainingSeconds / 60);
   const seconds = state.timer.remainingSeconds % 60;
-  elements.timerDisplay.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  elements.timerDisplay.textContent =
+    `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function completeSprint() {
@@ -740,9 +1001,15 @@ function completeSprint() {
   state.timer.remainingSeconds = state.timer.selectedDuration * 60;
   updateTimerDisplay();
   renderTimerStatus("Sprint complete. Nice work.");
+  state.ai.coachMessage = buildSprintCoachMessage();
+  state.ai.insight = buildSprintInsight();
   saveState();
   renderHeaderStats();
   renderHistory();
+
+  if (canUseAI() && state.tasks.length) {
+    void refreshAIGuidance("sprint_complete");
+  }
 }
 
 function buildCompleteCopy() {
@@ -751,7 +1018,20 @@ function buildCompleteCopy() {
     return "You showed up. Want another round or a softer landing?";
   }
 
-  return `You just gave "${decodeHtml(focusedStep.title)}" ${state.timer.selectedDuration} focused minutes.`;
+  return `You just gave "${focusedStep.title}" ${state.timer.selectedDuration} focused minutes.`;
+}
+
+function buildSprintCoachMessage() {
+  const focusedStep = getFocusedStep();
+  if (!focusedStep) {
+    return "You showed up, which is enough to make the next restart easier.";
+  }
+
+  return `You stayed with "${focusedStep.title}" for a full sprint. Decide whether you want one more pass or a clean pause.`;
+}
+
+function buildSprintInsight() {
+  return "Attention usually returns faster when the next step is already named before you stop.";
 }
 
 function stopTimer() {
@@ -772,7 +1052,7 @@ function recordHistory(type, summary, taskTitle = null) {
     timestamp: new Date().toISOString(),
   });
 
-  state.history = state.history.slice(0, 16);
+  state.history = state.history.slice(0, 20);
 }
 
 function renderHistory() {
@@ -850,15 +1130,71 @@ function syncTimerSelections() {
   });
 }
 
+function toggleBusyState() {
+  const disabled = state.ai.isLoading;
+  elements.generatePlan.disabled = disabled;
+  elements.pickNextStep.disabled = disabled;
+}
+
+function setAiLoading(message) {
+  state.ai.isLoading = true;
+  state.ai.statusText = message;
+  renderAiPanel();
+  toggleBusyState();
+}
+
+function setAiFallback(message) {
+  state.ai.isLoading = false;
+  state.ai.mode = "fallback";
+  state.ai.statusText = message;
+  state.ai.guidanceReason = "";
+
+  if (!state.ai.coachMessage) {
+    state.ai.coachMessage = "Step Zero is using its built-in guidance right now.";
+  }
+
+  if (!state.ai.insight) {
+    state.ai.insight = "Even fallback guidance works better when the next move is small and visible.";
+  }
+
+  toggleBusyState();
+}
+
+function canUseAI() {
+  return state.ai.available;
+}
+
 function saveState() {
   const serializable = {
     tasks: state.tasks,
     history: state.history,
     preferences: state.preferences,
     focus: state.focus,
+    ai: {
+      coachMessage: state.ai.coachMessage,
+      insight: state.ai.insight,
+      guidanceReason: state.ai.guidanceReason,
+    },
   };
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+}
+
+async function fetchJSON(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Request failed.");
+  }
+
+  return data;
 }
 
 function formatWhen(timestamp) {
@@ -871,18 +1207,21 @@ function formatWhen(timestamp) {
   });
 }
 
-function decodeHtml(text) {
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = text;
-  return textarea.value;
-}
-
 function labelEffort(effort) {
   return {
     low: "Low",
     medium: "Medium",
     high: "High",
   }[effort];
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 init();

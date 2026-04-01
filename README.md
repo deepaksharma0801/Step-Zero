@@ -4,25 +4,37 @@ Step Zero is a lightweight MVP for a focus sprint app designed around ADHD and o
 
 ## What it does
 
-- Turns a brain dump into task cards with tiny steps
-- Suggests a next step based on your current energy
+- Turns a brain dump into AI-generated task cards with tiny steps
+- Uses AI to suggest the next best step based on your current energy
+- Gives short coach messages and gentle insights about your task board
 - Lets you focus a specific step and run 5, 10, 15, or 25 minute sprints
 - Tracks completed steps, completed sprints, and return count in local storage
 
 ## Run it
 
-Because this version has no build step, you can open [`index.html`](/Users/snadimi3/Documents/APP%20idea/index.html) directly in a browser.
+This version should be run through the local app server so AI can stay on the backend.
 
-If you want to serve it locally instead:
+1. Copy [.env.example](/Users/snadimi3/Documents/APP%20idea/.env.example) to `.env`
+2. Put your OpenAI key in `.env`
+3. Start the server:
 
 ```bash
-python3 -m http.server 8000
+node server.js
 ```
 
-Then open [http://localhost:8000](http://localhost:8000).
+Then open [http://localhost:3000](http://localhost:3000).
+
+## How AI works
+
+After the server is configured:
+
+- `Turn this into tiny steps` uses AI to break down the brain dump
+- `Refresh guidance` asks AI for the next step, a coach message, and an insight
+- The user does not need to enter an API key or model in the app UI
 
 ## Notes
 
 - Data is stored locally in the browser with `localStorage`
-- The task breakdown logic is heuristic right now, so it works as a smart MVP rather than a full AI planner
-- A natural next step would be upgrading the breakdown engine to call a real API and adding authentication plus synced storage
+- OpenAI requests are proxied through [server.js](/Users/snadimi3/Documents/APP%20idea/server.js), so the key stays on the server
+- The default server model is `gpt-5-mini`, configurable through `.env`
+- If AI is unavailable, the app falls back to its built-in local planning logic

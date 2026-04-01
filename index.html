@@ -11,9 +11,8 @@
       <div class="topbar">
         <div>
           <p class="eyebrow">Step Zero</p>
-          <p class="topbar-title">Focus dashboard</p>
+          <p class="topbar-title">A calmer place to start</p>
         </div>
-        <p class="topbar-copy">Clear the noise. Pick one next move. Stay with it.</p>
       </div>
 
       <header class="hero">
@@ -21,145 +20,174 @@
           <p class="eyebrow">Step Zero Method</p>
           <h1>Start before your brain starts negotiating.</h1>
           <p class="hero-text">
-            Dump the swirl, break it into tiny actions, and let the app hand you one calm
-            next step.
+            Drop the messy version first. Step Zero will help turn it into one workable next move.
           </p>
-        </div>
-        <div class="hero-card">
-          <p class="hero-card-label">Today&apos;s momentum</p>
-          <div class="hero-stats">
-            <div class="stat-tile">
-              <span class="stat-caption">Completed</span>
-              <span id="today-steps" class="hero-stat-value">0</span>
-              <span class="hero-stat-label">steps finished</span>
+          <div class="brain-dump-shell hero-brain-dump-shell">
+            <div class="brain-dump-bar">
+              <p class="brain-dump-label">Brain dump box</p>
+              <p class="brain-dump-hint">Nothing has to be organized yet.</p>
             </div>
-            <div class="stat-tile">
-              <span class="stat-caption">Focused</span>
-              <span id="today-sprints" class="hero-stat-value">0</span>
-              <span class="hero-stat-label">sprints completed</span>
-            </div>
+            <label class="sr-only" for="brain-dump">Brain dump</label>
+            <textarea
+              id="brain-dump"
+              placeholder="finish deck
+email Sarah back
+pay electric bill
+laundry
+call doctor"
+            ></textarea>
           </div>
-          <p id="momentum-note" class="hero-note">Small counts. Small still counts.</p>
+          <div class="input-actions hero-input-actions">
+            <button id="generate-plan" class="button button-primary">Build my plan</button>
+            <button id="load-demo" class="button button-secondary">See an example</button>
+            <button id="clear-all" class="button button-ghost">Clear board</button>
+          </div>
+          <div class="hero-meta">
+            <p class="helper-text hero-helper-text">
+              Separate tasks with a new line, comma, or semicolon. The app will keep things gentle
+              and concrete.
+            </p>
+          </div>
+        </div>
+        <div class="hero-side">
+          <div class="hero-card">
+            <p class="hero-card-label">Today&apos;s momentum</p>
+            <div class="hero-stats">
+              <div class="stat-tile">
+                <span class="stat-caption">Completed</span>
+                <span id="today-steps" class="hero-stat-value">0</span>
+                <span class="hero-stat-label">steps finished</span>
+              </div>
+              <div class="stat-tile">
+                <span class="stat-caption">Focused</span>
+                <span id="today-sprints" class="hero-stat-value">0</span>
+                <span class="hero-stat-label">sprints completed</span>
+              </div>
+            </div>
+            <p id="momentum-note" class="hero-note">Small counts. Small still counts.</p>
+          </div>
+
+          <section class="panel panel-next-step hero-guide-panel">
+            <div class="section-heading section-heading-row">
+              <div>
+                <p class="section-kicker">AI Guide</p>
+                <h2>Get a suggested next step, coaching, and a helpful insight.</h2>
+              </div>
+              <p class="section-note">AI when connected. Calm fallback when not.</p>
+            </div>
+            <div class="ai-setup hero-ai-setup">
+              <div class="ai-setup-copy">
+                <p class="ai-setup-title">AI status</p>
+                <p id="ai-status-copy" class="ai-setup-note">
+                  Step Zero is checking whether the AI guide is ready.
+                </p>
+              </div>
+            </div>
+            <div class="energy-picker" role="group" aria-label="Energy level">
+              <button class="energy-option is-active" data-energy="low">Low energy</button>
+              <button class="energy-option" data-energy="medium">Steady</button>
+              <button class="energy-option" data-energy="high">Locked in</button>
+            </div>
+            <div id="suggestion-card" class="suggestion-card empty">
+              <p class="suggestion-empty">Add a few tasks and Step Zero will pick a tiny next move.</p>
+            </div>
+            <div class="ai-response">
+              <div class="ai-copy-block">
+                <p class="ai-copy-label">Coach</p>
+                <p id="coach-message" class="ai-copy-text">
+                  The AI coach will guide your next move here when it is ready.
+                </p>
+              </div>
+              <div class="ai-copy-block">
+                <p class="ai-copy-label">Insight</p>
+                <p id="coach-insight" class="ai-copy-text">
+                  Your patterns and gentle nudges will show up here.
+                </p>
+              </div>
+            </div>
+            <button id="pick-next-step" class="button button-primary button-full">Refresh guidance</button>
+          </section>
         </div>
       </header>
 
       <main class="layout">
-        <section class="panel panel-input">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="section-kicker">1. Brain Dump</p>
-              <h2>What is buzzing in your head?</h2>
+        <div class="main-column main-column-primary">
+          <section class="panel panel-tasks">
+            <div class="section-heading section-heading-row">
+              <div>
+                <p class="section-kicker">Task Board</p>
+                <h2>Your work, translated into lighter lifts.</h2>
+              </div>
+              <p class="section-note">Keep the next action visible.</p>
             </div>
-            <p class="section-note">Capture first. Organize second.</p>
-          </div>
-          <label class="sr-only" for="brain-dump">Brain dump</label>
-          <textarea
-            id="brain-dump"
-            placeholder="Examples: finish deck, email Sarah back, pay electric bill, laundry, call doctor"
-          ></textarea>
-          <div class="input-actions">
-            <button id="generate-plan" class="button button-primary">Turn this into tiny steps</button>
-            <button id="load-demo" class="button button-secondary">Try a sample reset</button>
-            <button id="clear-all" class="button button-ghost">Clear board</button>
-          </div>
-          <p class="helper-text">
-            Separate tasks with a new line, comma, or semicolon. The app will keep things gentle
-            and concrete.
-          </p>
-        </section>
+            <div id="task-list" class="task-list empty-state">
+              <p>No tasks yet. Brain dump a few things to get your first Step Zero plan.</p>
+            </div>
+          </section>
 
-        <section class="panel panel-next-step">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="section-kicker">2. Next Step</p>
-              <h2>Let the app choose the easiest useful move.</h2>
+          <section class="panel panel-history">
+            <div class="section-heading section-heading-row">
+              <div>
+                <p class="section-kicker">History</p>
+                <h2>Proof that you do come back.</h2>
+              </div>
+              <p class="section-note">Momentum over streaks.</p>
             </div>
-            <p class="section-note">Filter by energy.</p>
-          </div>
-          <div class="energy-picker" role="group" aria-label="Energy level">
-            <button class="energy-option is-active" data-energy="low">Low energy</button>
-            <button class="energy-option" data-energy="medium">Steady</button>
-            <button class="energy-option" data-energy="high">Locked in</button>
-          </div>
-          <div id="suggestion-card" class="suggestion-card empty">
-            <p class="suggestion-empty">Add a few tasks and Step Zero will pick a tiny next move.</p>
-          </div>
-          <button id="pick-next-step" class="button button-primary button-full">Suggest a next step</button>
-        </section>
+            <div class="history-grid">
+              <div class="history-card">
+                <span class="stat-caption">Resets</span>
+                <span class="history-number" id="return-count">0</span>
+                <span class="history-label">times you restarted</span>
+              </div>
+              <div class="history-card">
+                <span class="stat-caption">Open</span>
+                <span class="history-number" id="open-loops">0</span>
+                <span class="history-label">unfinished tiny steps</span>
+              </div>
+            </div>
+            <div id="history-log" class="history-log empty-state">
+              <p>Your completed steps and sprints will show up here.</p>
+            </div>
+          </section>
+        </div>
 
-        <section class="panel panel-tasks">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="section-kicker">3. Task Board</p>
-              <h2>Your work, translated into lighter lifts.</h2>
+        <div class="main-column main-column-secondary">
+          <section class="panel panel-timer">
+            <div class="section-heading section-heading-row">
+              <div>
+                <p class="section-kicker">Sprint</p>
+                <h2>Stay with one thing for a little while.</h2>
+              </div>
+              <p class="section-note">Short, focused blocks.</p>
             </div>
-            <p class="section-note">Keep the next action visible.</p>
-          </div>
-          <div id="task-list" class="task-list empty-state">
-            <p>No tasks yet. Brain dump a few things to get your first Step Zero plan.</p>
-          </div>
-        </section>
-
-        <section class="panel panel-timer">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="section-kicker">4. Sprint</p>
-              <h2>Stay with one thing for a little while.</h2>
+            <div class="timer-face">
+              <p id="timer-status" class="timer-status">Ready when you are.</p>
+              <div id="timer-display" class="timer-display">10:00</div>
             </div>
-            <p class="section-note">Short, focused blocks.</p>
-          </div>
-          <div class="timer-face">
-            <p id="timer-status" class="timer-status">Ready when you are.</p>
-            <div id="timer-display" class="timer-display">10:00</div>
-          </div>
-          <div class="duration-picker" role="group" aria-label="Sprint duration">
-            <button class="duration-option is-active" data-duration="5">5 min</button>
-            <button class="duration-option" data-duration="10">10 min</button>
-            <button class="duration-option" data-duration="15">15 min</button>
-            <button class="duration-option" data-duration="25">25 min</button>
-          </div>
-          <div class="timer-actions">
-            <button id="start-timer" class="button button-primary">Start sprint</button>
-            <button id="pause-timer" class="button button-secondary">Pause</button>
-            <button id="reset-timer" class="button button-ghost">Reset</button>
-          </div>
-          <div id="timer-target" class="timer-target">Suggested focus: nothing selected yet.</div>
-          <div id="sprint-complete" class="sprint-complete hidden">
-            <p class="complete-title">Sprint complete.</p>
-            <p id="complete-copy" class="complete-copy">Want another round or a softer landing?</p>
-            <div class="complete-actions">
-              <button id="continue-sprint" class="button button-primary">Keep going</button>
-              <button id="take-break" class="button button-secondary">Take a break</button>
-              <button id="switch-task" class="button button-ghost">Switch task</button>
-              <button id="done-for-now" class="button button-ghost">Done for now</button>
+            <div class="duration-picker" role="group" aria-label="Sprint duration">
+              <button class="duration-option is-active" data-duration="5">5 min</button>
+              <button class="duration-option" data-duration="10">10 min</button>
+              <button class="duration-option" data-duration="15">15 min</button>
+              <button class="duration-option" data-duration="25">25 min</button>
             </div>
-          </div>
-        </section>
-
-        <section class="panel panel-history">
-          <div class="section-heading section-heading-row">
-            <div>
-              <p class="section-kicker">5. History</p>
-              <h2>Proof that you do come back.</h2>
+            <div class="timer-actions">
+              <button id="start-timer" class="button button-primary">Start sprint</button>
+              <button id="pause-timer" class="button button-secondary">Pause</button>
+              <button id="reset-timer" class="button button-ghost">Reset</button>
             </div>
-            <p class="section-note">Momentum over streaks.</p>
-          </div>
-          <div class="history-grid">
-            <div class="history-card">
-              <span class="stat-caption">Resets</span>
-              <span class="history-number" id="return-count">0</span>
-              <span class="history-label">times you restarted</span>
+            <div id="timer-target" class="timer-target">Suggested focus: nothing selected yet.</div>
+            <div id="sprint-complete" class="sprint-complete hidden">
+              <p class="complete-title">Sprint complete.</p>
+              <p id="complete-copy" class="complete-copy">Want another round or a softer landing?</p>
+              <div class="complete-actions">
+                <button id="continue-sprint" class="button button-primary">Keep going</button>
+                <button id="take-break" class="button button-secondary">Take a break</button>
+                <button id="switch-task" class="button button-ghost">Switch task</button>
+                <button id="done-for-now" class="button button-ghost">Done for now</button>
+              </div>
             </div>
-            <div class="history-card">
-              <span class="stat-caption">Open</span>
-              <span class="history-number" id="open-loops">0</span>
-              <span class="history-label">unfinished tiny steps</span>
-            </div>
-          </div>
-          <div id="history-log" class="history-log empty-state">
-            <p>Your completed steps and sprints will show up here.</p>
-          </div>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 
