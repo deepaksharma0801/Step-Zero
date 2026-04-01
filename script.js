@@ -9,6 +9,7 @@ pay internet bill`;
 const state = {
   tasks: [],
   history: [],
+  draftText: "",
   preferences: {
     energy: "low",
   },
@@ -36,6 +37,8 @@ const state = {
 
 const elements = {
   brainDump: document.querySelector("#brain-dump"),
+  draftPreview: document.querySelector("#draft-preview"),
+  draftCount: document.querySelector("#draft-count"),
   generatePlan: document.querySelector("#generate-plan"),
   loadDemo: document.querySelector("#load-demo"),
   clearAll: document.querySelector("#clear-all"),
@@ -66,6 +69,7 @@ const elements = {
   aiStatusCopy: document.querySelector("#ai-status-copy"),
   coachMessage: document.querySelector("#coach-message"),
   coachInsight: document.querySelector("#coach-insight"),
+  taskBoard: document.querySelector("#task-board"),
 };
 
 function init() {
@@ -86,6 +90,9 @@ function hydrateState() {
       }
       if (Array.isArray(parsed.history)) {
         state.history = parsed.history;
+      }
+      if (typeof parsed.draftText === "string") {
+        state.draftText = parsed.draftText;
       }
       if (parsed.preferences?.energy) {
         state.preferences.energy = parsed.preferences.energy;
@@ -109,6 +116,7 @@ function hydrateState() {
     }
   }
 
+  elements.brainDump.value = state.draftText;
   updateTimerDisplay();
   syncEnergySelections();
   syncTimerSelections();
@@ -116,13 +124,17 @@ function hydrateState() {
 
 function bindEvents() {
   elements.generatePlan.addEventListener("click", () => {
-    void handleGeneratePlan();
+    void handleGeneratePlan({ scrollToBoard: true });
   });
   elements.loadDemo.addEventListener("click", () => {
-    elements.brainDump.value = DEMO_TEXT;
-    void handleGeneratePlan();
+    setBrainDumpValue(DEMO_TEXT);
   });
   elements.clearAll.addEventListener("click", handleClearAll);
+  elements.brainDump.addEventListener("input", () => {
+    state.draftText = elements.brainDump.value;
+    renderDraftPreview();
+    saveState();
+  });
   elements.pickNextStep.addEventListener("click", () => {
     void handlePickNextStep();
   });
@@ -188,7 +200,7 @@ async function checkAIAvailability() {
   render();
 }
 
-async function handleGeneratePlan() {
+async function handleGeneratePlan(options = {}) {
   if (state.ai.isLoading) {
     return;
   }
@@ -230,7 +242,7 @@ async function handleGeneratePlan() {
   }
 
   state.tasks = mergeTasks(nextTasks, state.tasks);
-  elements.brainDump.value = "";
+  setBrainDumpValue("");
   ensureFocusedStep();
 
   recordHistory(
@@ -239,12 +251,17 @@ async function handleGeneratePlan() {
   );
   saveState();
   render();
+
+  if (options.scrollToBoard) {
+    elements.taskBoard?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function handleClearAll() {
   stopTimer();
   state.tasks = [];
   state.history = [];
+  setBrainDumpValue("");
   state.focus = { taskId: null, stepId: null };
   state.timer.selectedDuration = DEFAULT_DURATION;
   state.timer.remainingSeconds = DEFAULT_DURATION * 60;
@@ -255,7 +272,6 @@ function handleClearAll() {
   state.ai.insight = canUseAI()
     ? "A clean slate still counts as progress when you are restarting on purpose."
     : "Even without AI, the smallest visible next move is usually the right restart.";
-  elements.brainDump.value = "";
   syncTimerSelections();
   saveState();
   render();
@@ -766,6 +782,7 @@ function setFocus(taskId, stepId) {
 function render() {
   syncEnergySelections();
   syncTimerSelections();
+  renderDraftPreview();
   renderAiPanel();
   renderTasks();
   renderSuggestion();
@@ -781,6 +798,39 @@ function renderAiPanel() {
   elements.aiStatusCopy.textContent = state.ai.statusText;
   elements.coachMessage.textContent = state.ai.coachMessage;
   elements.coachInsight.textContent = state.ai.insight;
+}
+
+function renderDraftPreview() {
+  const entries = splitEntries(state.draftText);
+
+  elements.draftCount.textContent = `${entries.length} task${entries.length === 1 ? "" : "s"} ready`;
+
+  if (!entries.length) {
+    elements.draftPreview.className = "draft-preview empty-state";
+    elements.draftPreview.innerHTML =
+      "<p>As you add tasks, they will collect here before you send them into the full board.</p>";
+    return;
+  }
+
+  elements.draftPreview.className = "draft-preview";
+  elements.draftPreview.innerHTML = "";
+
+  entries.forEach((entry, index) => {
+    const row = document.createElement("div");
+    row.className = "draft-item";
+
+    const text = document.createElement("p");
+    text.className = "draft-item-text";
+    text.textContent = tidySentence(entry);
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "button button-mini button-ghost draft-remove";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => removeDraftEntry(index));
+
+    row.append(text, removeButton);
+    elements.draftPreview.append(row);
+  });
 }
 
 function renderTasks() {
@@ -1167,6 +1217,7 @@ function saveState() {
   const serializable = {
     tasks: state.tasks,
     history: state.history,
+    draftText: state.draftText,
     preferences: state.preferences,
     focus: state.focus,
     ai: {
@@ -1177,6 +1228,19 @@ function saveState() {
   };
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+}
+
+function setBrainDumpValue(value) {
+  state.draftText = value;
+  elements.brainDump.value = value;
+  renderDraftPreview();
+  saveState();
+}
+
+function removeDraftEntry(indexToRemove) {
+  const entries = splitEntries(state.draftText);
+  entries.splice(indexToRemove, 1);
+  setBrainDumpValue(entries.join("\n"));
 }
 
 async function fetchJSON(url, body) {

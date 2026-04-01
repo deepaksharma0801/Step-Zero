@@ -27,18 +27,35 @@
               <p class="brain-dump-label">Brain dump box</p>
               <p class="brain-dump-hint">Nothing has to be organized yet.</p>
             </div>
-            <label class="sr-only" for="brain-dump">Brain dump</label>
-            <textarea
-              id="brain-dump"
-              placeholder="finish deck
+            <div class="brain-dump-split">
+              <div class="brain-dump-pane brain-dump-pane-input">
+                <div class="brain-pane-header">
+                  <p class="brain-pane-label">Drop it here</p>
+                  <p class="brain-pane-note">Messy is welcome.</p>
+                </div>
+                <label class="sr-only" for="brain-dump">Brain dump</label>
+                <textarea
+                  id="brain-dump"
+                  placeholder="finish deck
 email Sarah back
 pay electric bill
 laundry
 call doctor"
-            ></textarea>
+                ></textarea>
+              </div>
+              <div class="brain-dump-pane brain-dump-pane-preview">
+                <div class="brain-pane-header">
+                  <p class="brain-pane-label">Your running list</p>
+                  <p id="draft-count" class="brain-pane-note">0 tasks ready</p>
+                </div>
+                <div id="draft-preview" class="draft-preview empty-state">
+                  <p>As you add tasks, they will collect here before you send them into the full board.</p>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="input-actions hero-input-actions">
-            <button id="generate-plan" class="button button-primary">Build my plan</button>
+            <button id="generate-plan" class="button button-primary">Let&apos;s get working</button>
             <button id="load-demo" class="button button-secondary">See an example</button>
             <button id="clear-all" class="button button-ghost">Clear board</button>
           </div>
@@ -112,7 +129,7 @@ call doctor"
 
       <main class="layout">
         <div class="main-column main-column-primary">
-          <section class="panel panel-tasks">
+          <section id="task-board" class="panel panel-tasks">
             <div class="section-heading section-heading-row">
               <div>
                 <p class="section-kicker">Task Board</p>
