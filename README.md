@@ -1,6 +1,6 @@
 # Step Zero
 
-Step Zero is a calm, ADHD-friendly focus app for getting unstuck. You dump a messy list of tasks, keep a running list of active work, let AI turn that into smaller steps, and then move into a detailed board with next-step guidance and short sprint timers.
+Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You dump a messy list of tasks, keep a running list of active work, let AI turn that into smaller steps, and then move into a detailed board with next-step guidance and short sprint timers.
 
 ## Current flow
 
