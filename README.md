@@ -4,7 +4,7 @@ Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You d
 
 ## Current flow
 
-1. Drop thoughts into the split brain dump workspace
+1. Drop your thoughts into the split brain dump workspace
 2. Watch tasks collect in the running list on the right
 3. Remove draft-only items if they were added by mistake
 4. Click `Let's get working`
