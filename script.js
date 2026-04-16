@@ -4,6 +4,7 @@ const DEMO_TEXT = `finish pitch deck
 email Sarah about launch copy
 laundry
 call doctor for appointment
+make pasta
 pay internet bill`;
 
 const state = {
