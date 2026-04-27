@@ -560,10 +560,112 @@ textarea:focus {
   gap: 0.2rem;
 }
 
+.ai-chat {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.ai-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+}
+
+.ai-chat-note {
+  margin-top: 0;
+  font-size: 0.84rem;
+  text-align: right;
+  white-space: normal;
+}
+
+.chat-thread {
+  display: grid;
+  gap: 0.7rem;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.chat-thread.empty-state {
+  padding: 0.2rem 0 0;
+}
+
+.chat-bubble {
+  max-width: 92%;
+  padding: 0.85rem 0.95rem;
+  border-radius: 18px;
+  border: 1px solid rgba(63, 119, 182, 0.1);
+}
+
+.chat-bubble.is-user {
+  justify-self: end;
+  background: rgba(221, 234, 251, 0.9);
+}
+
+.chat-bubble.is-assistant {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.chat-role,
+.chat-text {
+  margin: 0;
+}
+
+.chat-role {
+  margin-bottom: 0.28rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
+.chat-text {
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.chat-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.chat-input {
+  min-height: 88px;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(63, 119, 182, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  resize: vertical;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.chat-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .task-list,
 .history-log {
   display: grid;
   gap: 0.9rem;
+}
+
+.completed-section {
+  margin-top: 1.4rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.completed-heading {
+  margin-bottom: 0.8rem;
 }
 
 .task-list.empty-state,
@@ -583,8 +685,26 @@ textarea:focus {
   border-bottom: 0;
 }
 
+.task-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
 .task-card.is-focused {
   background: linear-gradient(90deg, rgba(221, 234, 251, 0.6), transparent 38%);
+}
+
+.task-card.is-editing {
+  padding: 0.9rem;
+  border: 1px solid rgba(63, 119, 182, 0.14);
+  border-radius: 20px;
+  background: rgba(244, 249, 255, 0.9);
+}
+
+.task-card-complete {
+  opacity: 0.9;
 }
 
 .task-card-top {
@@ -606,6 +726,20 @@ textarea:focus {
   gap: 0;
 }
 
+.task-edit-input {
+  width: 100%;
+  border: 1px solid rgba(63, 119, 182, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.72rem 0.85rem;
+  color: var(--ink);
+}
+
+.task-edit-input-small {
+  max-width: 13rem;
+  margin-bottom: 0.55rem;
+}
+
 .step-item {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -613,6 +747,10 @@ textarea:focus {
   gap: 0.75rem;
   padding: 0.8rem 0;
   border-top: 1px solid rgba(31, 57, 82, 0.08);
+}
+
+.step-item-editor {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .step-item.is-done {

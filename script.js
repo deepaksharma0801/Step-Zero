@@ -11,6 +11,9 @@ const state = {
   tasks: [],
   history: [],
   draftText: "",
+  ui: {
+    editingTaskId: null,
+  },
   preferences: {
     energy: "low",
   },
@@ -31,6 +34,7 @@ const state = {
     coachMessage: "The AI coach will guide your next move here when it is ready.",
     insight: "Your patterns and gentle nudges will show up here.",
     guidanceReason: "",
+    chatMessages: [],
     isLoading: false,
     mode: "fallback",
   },
@@ -44,6 +48,7 @@ const elements = {
   loadDemo: document.querySelector("#load-demo"),
   clearAll: document.querySelector("#clear-all"),
   taskList: document.querySelector("#task-list"),
+  completedList: document.querySelector("#completed-list"),
   suggestionCard: document.querySelector("#suggestion-card"),
   pickNextStep: document.querySelector("#pick-next-step"),
   energyOptions: document.querySelectorAll(".energy-option"),
@@ -70,6 +75,10 @@ const elements = {
   aiStatusCopy: document.querySelector("#ai-status-copy"),
   coachMessage: document.querySelector("#coach-message"),
   coachInsight: document.querySelector("#coach-insight"),
+  chatThread: document.querySelector("#chat-thread"),
+  chatForm: document.querySelector("#chat-form"),
+  chatInput: document.querySelector("#chat-input"),
+  sendChat: document.querySelector("#send-chat"),
   taskBoard: document.querySelector("#task-board"),
 };
 
@@ -110,6 +119,9 @@ function hydrateState() {
           coachMessage: parsed.ai.coachMessage || state.ai.coachMessage,
           insight: parsed.ai.insight || state.ai.insight,
           guidanceReason: parsed.ai.guidanceReason || "",
+          chatMessages: Array.isArray(parsed.ai.chatMessages)
+            ? parsed.ai.chatMessages
+            : state.ai.chatMessages,
         };
       }
     } catch (error) {
@@ -138,6 +150,16 @@ function bindEvents() {
   });
   elements.pickNextStep.addEventListener("click", () => {
     void handlePickNextStep();
+  });
+  elements.chatForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void handleChatSubmit();
+  });
+  elements.chatInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void handleChatSubmit();
+    }
   });
   elements.startTimer.addEventListener("click", handleStartTimer);
   elements.pauseTimer.addEventListener("click", handlePauseTimer);
@@ -208,6 +230,10 @@ async function handleGeneratePlan(options = {}) {
 
   const rawText = elements.brainDump.value.trim();
   if (!rawText) {
+    if (options.scrollToBoard && state.tasks.length) {
+      elements.taskBoard?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     elements.brainDump.focus();
     return;
   }
@@ -262,6 +288,7 @@ function handleClearAll() {
   stopTimer();
   state.tasks = [];
   state.history = [];
+  state.ui.editingTaskId = null;
   setBrainDumpValue("");
   state.focus = { taskId: null, stepId: null };
   state.timer.selectedDuration = DEFAULT_DURATION;
@@ -774,6 +801,7 @@ function toggleStep(taskId, stepId) {
 }
 
 function setFocus(taskId, stepId) {
+  state.ui.editingTaskId = null;
   state.focus.taskId = taskId;
   state.focus.stepId = stepId;
   saveState();
@@ -785,7 +813,9 @@ function render() {
   syncTimerSelections();
   renderDraftPreview();
   renderAiPanel();
+  renderChatThread();
   renderTasks();
+  renderCompletedTasks();
   renderSuggestion();
   renderTimerTarget();
   renderTimerStatus();
@@ -799,6 +829,38 @@ function renderAiPanel() {
   elements.aiStatusCopy.textContent = state.ai.statusText;
   elements.coachMessage.textContent = state.ai.coachMessage;
   elements.coachInsight.textContent = state.ai.insight;
+}
+
+function renderChatThread() {
+  const messages = state.ai.chatMessages;
+
+  if (!messages.length) {
+    elements.chatThread.className = "chat-thread empty-state";
+    elements.chatThread.innerHTML =
+      "<p>The coach chat will show up here once you ask something.</p>";
+    return;
+  }
+
+  elements.chatThread.className = "chat-thread";
+  elements.chatThread.innerHTML = "";
+
+  messages.forEach((message) => {
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${message.role === "user" ? "is-user" : "is-assistant"}`;
+
+    const label = document.createElement("p");
+    label.className = "chat-role";
+    label.textContent = message.role === "user" ? "You" : "Coach";
+
+    const text = document.createElement("p");
+    text.className = "chat-text";
+    text.textContent = message.content;
+
+    bubble.append(label, text);
+    elements.chatThread.append(bubble);
+  });
+
+  elements.chatThread.scrollTop = elements.chatThread.scrollHeight;
 }
 
 function renderDraftPreview() {
@@ -876,7 +938,15 @@ function renderTasks() {
     const meta = fragment.querySelector(".task-meta");
     const stepList = fragment.querySelector(".step-list");
     const focusButton = fragment.querySelector(".focus-task");
+    const editButton = fragment.querySelector(".edit-task");
+    const deleteButton = fragment.querySelector(".delete-task");
     const openStepCount = getOpenSteps(task).length;
+
+    if (task.id === state.ui.editingTaskId) {
+      renderTaskEditor(card, meta, stepList, task);
+      elements.taskList.append(fragment);
+      return;
+    }
 
     category.textContent = task.category;
     title.textContent = task.title;
@@ -892,6 +962,8 @@ function renderTasks() {
         setFocus(task.id, nextStep.id);
       }
     });
+    editButton.addEventListener("click", () => startTaskEdit(task.id));
+    deleteButton.addEventListener("click", () => deleteTask(task.id));
 
     task.steps.forEach((step) => {
       const item = document.createElement("li");
@@ -931,6 +1003,277 @@ function renderTasks() {
 
     elements.taskList.append(fragment);
   });
+}
+
+function renderTaskEditor(card, meta, stepList, task) {
+  card.classList.add("is-editing");
+
+  const titleInput = document.createElement("input");
+  titleInput.className = "task-edit-input task-edit-title";
+  titleInput.value = task.title;
+  titleInput.setAttribute("aria-label", "Task title");
+
+  const categoryInput = document.createElement("input");
+  categoryInput.className = "task-edit-input task-edit-input-small task-edit-category";
+  categoryInput.value = task.category;
+  categoryInput.setAttribute("aria-label", "Task category");
+
+  const titleWrap = card.querySelector(".task-title");
+  const categoryWrap = card.querySelector(".task-category");
+  titleWrap.replaceWith(titleInput);
+  categoryWrap.replaceWith(categoryInput);
+
+  meta.textContent = "Edit the task name, category, or tiny step wording.";
+
+  task.steps.forEach((step) => {
+    const item = document.createElement("li");
+    item.className = "step-item step-item-editor";
+
+    const label = document.createElement("span");
+    label.className = "step-detail";
+    label.textContent = `${labelEffort(step.effort)} lift • ${step.minutes} min`;
+
+    const input = document.createElement("input");
+    input.className = "task-edit-input task-edit-step";
+    input.value = step.title;
+    input.dataset.stepId = step.id;
+    input.setAttribute("aria-label", `Edit step ${step.title}`);
+
+    item.append(input, label);
+    stepList.append(item);
+  });
+
+  const actions = card.querySelector(".task-card-actions");
+  actions.innerHTML = "";
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "button button-mini button-primary";
+  saveButton.textContent = "Save";
+  saveButton.addEventListener("click", () => saveTaskEdit(task.id, card));
+
+  const cancelButton = document.createElement("button");
+  cancelButton.className = "button button-mini button-secondary";
+  cancelButton.textContent = "Cancel";
+  cancelButton.addEventListener("click", cancelTaskEdit);
+
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "button button-mini button-ghost";
+  deleteButton.textContent = "Delete";
+  deleteButton.addEventListener("click", () => deleteTask(task.id));
+
+  actions.append(saveButton, cancelButton, deleteButton);
+}
+
+function renderCompletedTasks() {
+  elements.completedList.innerHTML = "";
+  const completedTasks = state.tasks.filter((task) => isTaskDone(task));
+
+  if (!completedTasks.length) {
+    elements.completedList.className = "task-list empty-state";
+    elements.completedList.innerHTML =
+      "<p>Finished tasks will land here once they are fully done.</p>";
+    return;
+  }
+
+  elements.completedList.className = "task-list completed-list";
+
+  completedTasks.forEach((task) => {
+    const card = document.createElement("article");
+    card.className = "task-card task-card-complete";
+
+    const top = document.createElement("div");
+    top.className = "task-card-top";
+
+    const copyWrap = document.createElement("div");
+    const category = document.createElement("p");
+    category.className = "task-category";
+    category.textContent = task.category;
+
+    const title = document.createElement("h3");
+    title.className = "task-title";
+    title.textContent = task.title;
+
+    copyWrap.append(category, title);
+
+    const actions = document.createElement("div");
+    actions.className = "task-card-actions";
+
+    const restoreButton = document.createElement("button");
+    restoreButton.className = "button button-mini button-secondary";
+    restoreButton.textContent = "Bring back";
+    restoreButton.addEventListener("click", () => restoreTask(task.id));
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "button button-mini button-ghost";
+    removeButton.textContent = "Remove";
+    removeButton.addEventListener("click", () => removeTaskPermanently(task.id));
+
+    actions.append(restoreButton, removeButton);
+    top.append(copyWrap, actions);
+
+    const meta = document.createElement("p");
+    meta.className = "task-meta";
+    meta.textContent = `Completed ${formatCompletedTaskTime(task)}.`;
+
+    card.append(top, meta);
+    elements.completedList.append(card);
+  });
+}
+
+async function handleChatSubmit() {
+  if (state.ai.isLoading) {
+    return;
+  }
+
+  const content = elements.chatInput.value.trim();
+  if (!content) {
+    elements.chatInput.focus();
+    return;
+  }
+
+  pushChatMessage("user", content);
+  elements.chatInput.value = "";
+
+  if (!canUseAI()) {
+    pushChatMessage("assistant", buildFallbackChatReply(content));
+    state.ai.statusText = "AI coach chat is offline right now, so Step Zero is answering with built-in support.";
+    saveState();
+    render();
+    return;
+  }
+
+  try {
+    setAiLoading("AI coach is reading your board and writing back...");
+    renderChatThread();
+
+    const data = await fetchJSON("/api/chat", {
+      energy: state.preferences.energy,
+      focus: state.focus,
+      history: state.history.slice(0, 8),
+      tasks: buildOpenTaskPayload(),
+      messages: state.ai.chatMessages.slice(-8),
+    });
+
+    pushChatMessage("assistant", data.reply);
+    state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
+    state.ai.mode = "live";
+    state.ai.isLoading = false;
+    saveState();
+    render();
+  } catch (error) {
+    console.error(error);
+    setAiFallback("AI coach chat hit a snag, so Step Zero switched back to built-in support.");
+    pushChatMessage("assistant", buildFallbackChatReply(content));
+    saveState();
+    render();
+  }
+}
+
+function startTaskEdit(taskId) {
+  state.ui.editingTaskId = taskId;
+  render();
+}
+
+function cancelTaskEdit() {
+  state.ui.editingTaskId = null;
+  render();
+}
+
+function saveTaskEdit(taskId, card) {
+  const task = state.tasks.find((entry) => entry.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  const titleInput = card.querySelector(".task-edit-title");
+  const stepInputs = Array.from(card.querySelectorAll("[data-step-id]"));
+  const categoryInput = card.querySelector(".task-edit-category");
+
+  const nextTitle = tidySentence(titleInput?.value || task.title);
+  const nextCategory = tidySentence(categoryInput?.value || task.category);
+
+  if (!nextTitle) {
+    return;
+  }
+
+  task.title = nextTitle;
+  task.category = nextCategory || "General";
+
+  stepInputs.forEach((input) => {
+    const step = task.steps.find((entry) => entry.id === input.dataset.stepId);
+    if (!step) {
+      return;
+    }
+
+    const nextStepTitle = tidySentence(input.value || step.title);
+    if (nextStepTitle) {
+      step.title = nextStepTitle;
+    }
+  });
+
+  state.ui.editingTaskId = null;
+  recordHistory("reset", `Updated task details for ${task.title}.`);
+  saveState();
+  render();
+}
+
+function deleteTask(taskId) {
+  const task = state.tasks.find((entry) => entry.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Remove "${task.title}" from your board?`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.tasks = state.tasks.filter((entry) => entry.id !== taskId);
+  state.ui.editingTaskId = state.ui.editingTaskId === taskId ? null : state.ui.editingTaskId;
+
+  if (state.focus.taskId === taskId) {
+    state.focus.taskId = null;
+    state.focus.stepId = null;
+  }
+
+  ensureFocusedStep();
+  recordHistory("reset", `Removed task: ${task.title}.`);
+  saveState();
+  render();
+}
+
+function restoreTask(taskId) {
+  const task = state.tasks.find((entry) => entry.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  task.steps.forEach((step) => {
+    step.done = false;
+    step.completedAt = null;
+  });
+
+  ensureFocusedStep();
+  recordHistory("reset", `Brought "${task.title}" back into the board.`);
+  saveState();
+  render();
+}
+
+function removeTaskPermanently(taskId) {
+  const task = state.tasks.find((entry) => entry.id === taskId);
+  if (!task) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Permanently remove "${task.title}" from completed?`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.tasks = state.tasks.filter((entry) => entry.id !== taskId);
+  recordHistory("reset", `Archived and removed ${task.title}.`);
+  saveState();
+  render();
 }
 
 function renderSuggestion() {
@@ -1021,6 +1364,61 @@ function buildFallbackCoachMessage(suggestion) {
 
 function buildFallbackInsight() {
   return `You are currently set to ${state.preferences.energy} energy, so Step Zero is leaning toward lighter, shorter moves first.`;
+}
+
+function buildFallbackChatReply(message) {
+  const lower = message.toLowerCase();
+  const suggestion = getSuggestedStep();
+
+  if (!state.tasks.length) {
+    return "Start by dropping in two or three tasks, then ask me to break them down. We only need a small starting point.";
+  }
+
+  if (lower.includes("overwhelmed") || lower.includes("stuck") || lower.includes("first")) {
+    if (suggestion) {
+      return `Start with "${suggestion.step.title}" from "${suggestion.task.title}". Keep it tiny and stop after one visible win.`;
+    }
+    return "Pick the lightest task on the board and do the smallest visible part first.";
+  }
+
+  if (lower.includes("break") || lower.includes("gentle")) {
+    return "Try a five-minute sprint, then pause on purpose. A softer restart usually works better than forcing a long push.";
+  }
+
+  if (lower.includes("rewrite") || lower.includes("rephrase")) {
+    return "Aim for task names that sound physically startable, like open, draft, send, or check. Specific beats ambitious here.";
+  }
+
+  return "Keep the next move small, visible, and easy to begin. If you want, ask me what to do first or how to break a task down more gently.";
+}
+
+function pushChatMessage(role, content) {
+  state.ai.chatMessages.push({
+    id: crypto.randomUUID(),
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+  });
+
+  state.ai.chatMessages = state.ai.chatMessages.slice(-14);
+}
+
+function buildOpenTaskPayload() {
+  return state.tasks
+    .filter((task) => !isTaskDone(task))
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      steps: task.steps
+        .filter((step) => !step.done)
+        .map((step) => ({
+          id: step.id,
+          title: step.title,
+          effort: step.effort,
+          minutes: step.minutes,
+        })),
+    }));
 }
 
 function buildProgressCoachMessage(stepTitle) {
@@ -1205,6 +1603,7 @@ function toggleBusyState() {
   const disabled = state.ai.isLoading;
   elements.generatePlan.disabled = disabled;
   elements.pickNextStep.disabled = disabled;
+  elements.sendChat.disabled = disabled;
 }
 
 function setAiLoading(message) {
@@ -1246,6 +1645,7 @@ function saveState() {
       coachMessage: state.ai.coachMessage,
       insight: state.ai.insight,
       guidanceReason: state.ai.guidanceReason,
+      chatMessages: state.ai.chatMessages,
     },
   };
 
@@ -1290,6 +1690,16 @@ function formatWhen(timestamp) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatCompletedTaskTime(task) {
+  const timestamps = task.steps
+    .map((step) => step.completedAt)
+    .filter(Boolean)
+    .sort()
+    .reverse();
+
+  return timestamps[0] ? formatWhen(timestamps[0]) : "just now";
 }
 
 function labelEffort(effort) {

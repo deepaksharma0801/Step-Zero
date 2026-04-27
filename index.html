@@ -122,6 +122,27 @@ call doctor"
                 </p>
               </div>
             </div>
+            <div class="ai-chat">
+              <div class="ai-chat-header">
+                <p class="ai-copy-label">Coach chat</p>
+                <p class="section-note ai-chat-note">Ask for help, reframing, or a gentler next move.</p>
+              </div>
+              <div id="chat-thread" class="chat-thread empty-state">
+                <p>The coach chat will show up here once you ask something.</p>
+              </div>
+              <form id="chat-form" class="chat-form">
+                <label class="sr-only" for="chat-input">Ask the AI coach a question</label>
+                <textarea
+                  id="chat-input"
+                  class="chat-input"
+                  rows="3"
+                  placeholder="I'm overwhelmed. What should I do first?"
+                ></textarea>
+                <div class="chat-actions">
+                  <button id="send-chat" type="submit" class="button button-primary">Ask coach</button>
+                </div>
+              </form>
+            </div>
             <button id="pick-next-step" class="button button-primary button-full">Refresh guidance</button>
           </section>
         </div>
@@ -139,6 +160,18 @@ call doctor"
             </div>
             <div id="task-list" class="task-list empty-state">
               <p>No tasks yet. Brain dump a few things to get your first Step Zero plan.</p>
+            </div>
+            <div class="completed-section">
+              <div class="section-heading section-heading-row completed-heading">
+                <div>
+                  <p class="section-kicker">Completed</p>
+                  <h2>Cleared tasks still count.</h2>
+                </div>
+                <p class="section-note">Restore or remove them anytime.</p>
+              </div>
+              <div id="completed-list" class="task-list empty-state">
+                <p>Finished tasks will land here once they are fully done.</p>
+              </div>
             </div>
           </section>
 
@@ -215,7 +248,11 @@ call doctor"
             <p class="task-category"></p>
             <h3 class="task-title"></h3>
           </div>
-          <button class="button button-mini button-ghost focus-task">Focus this</button>
+          <div class="task-card-actions">
+            <button class="button button-mini button-ghost edit-task">Edit</button>
+            <button class="button button-mini button-ghost delete-task">Delete</button>
+            <button class="button button-mini button-ghost focus-task">Focus this</button>
+          </div>
         </div>
         <p class="task-meta"></p>
         <ul class="step-list"></ul>

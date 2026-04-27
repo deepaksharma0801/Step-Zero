@@ -56,6 +56,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/chat") {
+      if (!enforceRateLimit(req, res)) {
+        return;
+      }
+      await handleChat(req, res);
+      return;
+    }
+
     if (req.method === "GET") {
       serveStatic(url.pathname, res);
       return;
@@ -205,6 +213,73 @@ async function handleGuidance(req, res) {
 
   const data = await requestAIJson({
     schemaName: "step_zero_guidance",
+    schema,
+    userPrompt: prompt,
+  });
+
+  sendJson(res, 200, data);
+}
+
+async function handleChat(req, res) {
+  if (!GEMINI_API_KEY) {
+    sendJson(res, 503, { error: "AI is not configured on the server." });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  const energy = normalizeEnergy(body.energy);
+  const tasks = Array.isArray(body.tasks) ? body.tasks : [];
+  const history = Array.isArray(body.history) ? body.history : [];
+  const focus = body.focus || {};
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
+
+  if (!latestUserMessage?.content) {
+    sendJson(res, 400, { error: "Missing chat message." });
+    return;
+  }
+
+  const conversation = messages
+    .slice(-8)
+    .map((message) => `${message.role === "user" ? "User" : "Coach"}: ${String(message.content || "")}`)
+    .join("\n");
+
+  const prompt = [
+    "You are Step Zero, a calm ADHD-friendly coach inside a productivity app.",
+    "Reply like a thoughtful human coach, not a support bot.",
+    "Keep the answer supportive, concrete, and concise.",
+    "Use short paragraphs or a very short list only when helpful.",
+    "Do not be cheesy. Do not over-celebrate. Do not sound clinical.",
+    "When helpful, reference the current board and suggest a tiny next action.",
+    "",
+    `Energy level: ${energy}`,
+    `Currently focused taskId: ${focus.taskId || "none"}`,
+    `Currently focused stepId: ${focus.stepId || "none"}`,
+    "Open tasks:",
+    JSON.stringify(tasks),
+    "Recent activity:",
+    JSON.stringify(history.slice(0, 8).map((item) => ({
+      type: item.type,
+      summary: item.summary,
+      timestamp: item.timestamp,
+    }))),
+    "Conversation so far:",
+    conversation || "No previous chat yet.",
+    "Latest user message:",
+    String(latestUserMessage.content),
+  ].join("\n");
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      reply: { type: "string" },
+    },
+    required: ["reply"],
+  };
+
+  const data = await requestAIJson({
+    schemaName: "step_zero_chat",
     schema,
     userPrompt: prompt,
   });
