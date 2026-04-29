@@ -6,9 +6,18 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check script.js"
+    "check": "eslint . --max-warnings 0 && node --check server.js && node --check script.js",
+    "lint": "eslint . --fix",
+    "test": "vitest",
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.29.1",
+    "vitest": "^1.6.0"
   }
 }
