@@ -89,7 +89,7 @@ Render will use:
 
 When Gemini is available:
 
-- the brain dump can be turned into structured tasks and steps
+- the brain dump can be turned into structured tasks and steps.
 - the app can suggest one next move from the current board
 - coach copy and insight copy update from the live board state
 
