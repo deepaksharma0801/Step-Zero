@@ -64,11 +64,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/agent/run") {
+    if (req.method === "POST" && url.pathname === "/api/task-plan") {
       if (!enforceRateLimit(req, res)) {
         return;
       }
-      await handleAgentRun(req, res);
+      await handleTaskPlan(req, res);
       return;
     }
 
@@ -236,11 +236,18 @@ async function handleChat(req, res) {
 
   const body = await readJsonBody(req);
   const energy = normalizeEnergy(body.energy);
-  const tasks = Array.isArray(body.tasks) ? body.tasks : [];
+  const selectedTask = body.selectedTask && typeof body.selectedTask === "object"
+    ? body.selectedTask
+    : null;
+  const boardTasks = Array.isArray(body.boardTasks) ? body.boardTasks : [];
   const history = Array.isArray(body.history) ? body.history : [];
-  const focus = body.focus || {};
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const latestUserMessage = [...messages].reverse().find((message) => message?.role === "user");
+
+  if (!selectedTask?.id || !selectedTask?.title) {
+    sendJson(res, 400, { error: "Select a task before chatting with the assistant." });
+    return;
+  }
 
   if (!latestUserMessage?.content) {
     sendJson(res, 400, { error: "Missing chat message." });
@@ -253,25 +260,28 @@ async function handleChat(req, res) {
     .join("\n");
 
   const prompt = [
-    "You are Step Zero, a calm ADHD-friendly coach inside a productivity app.",
+    "You are Step Zero, a calm task-scoped assistant inside a productivity app.",
+    "The selected task is your primary context. Reference it first.",
+    "Use the rest of the board only when it helps with prioritization or reducing friction.",
     "Reply like a thoughtful human coach, not a support bot.",
     "Keep the answer supportive, concrete, and concise.",
     "Use short paragraphs or a very short list only when helpful.",
     "Do not be cheesy. Do not over-celebrate. Do not sound clinical.",
-    "When helpful, reference the current board and suggest a tiny next action.",
+    "Suggest tiny task-specific next actions when helpful.",
     "",
     `Energy level: ${energy}`,
-    `Currently focused taskId: ${focus.taskId || "none"}`,
-    `Currently focused stepId: ${focus.stepId || "none"}`,
-    "Open tasks:",
-    JSON.stringify(tasks),
-    "Recent activity:",
+    "Selected task:",
+    JSON.stringify(selectedTask),
+    "Other open board tasks:",
+    JSON.stringify(boardTasks.filter((task) => task.id !== selectedTask.id)),
+    "Recent task and board activity:",
     JSON.stringify(history.slice(0, 8).map((item) => ({
       type: item.type,
       summary: item.summary,
+      taskTitle: item.taskTitle,
       timestamp: item.timestamp,
     }))),
-    "Conversation so far:",
+    "Selected task conversation so far:",
     conversation || "No previous chat yet.",
     "Latest user message:",
     String(latestUserMessage.content),
@@ -295,161 +305,83 @@ async function handleChat(req, res) {
   sendJson(res, 200, data);
 }
 
-async function handleAgentRun(req, res) {
+async function handleTaskPlan(req, res) {
   if (!GEMINI_API_KEY) {
     sendJson(res, 503, { error: "AI is not configured on the server." });
     return;
   }
 
   const body = await readJsonBody(req);
-  const goal = String(body.goal || "").trim();
   const energy = normalizeEnergy(body.energy);
-  const openTasks = Array.isArray(body.openTasks) ? body.openTasks : [];
-  const completedTasks = Array.isArray(body.completedTasks) ? body.completedTasks : [];
-  const history = Array.isArray(body.history) ? body.history : [];
-  const chatMessages = Array.isArray(body.chatMessages) ? body.chatMessages : [];
-  const focus = body.focus || {};
-  const contextSummary = String(body.contextSummary || "");
+  const selectedTask = body.selectedTask && typeof body.selectedTask === "object"
+    ? body.selectedTask
+    : null;
+  const boardSummary = String(body.boardSummary || "");
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const instruction = String(body.instruction || "").trim();
 
-  if (!goal) {
-    sendJson(res, 400, { error: "Missing agent goal." });
+  if (!selectedTask?.id || !selectedTask?.title) {
+    sendJson(res, 400, { error: "Select a task before planning." });
     return;
   }
 
-  const conversation = chatMessages
+  const conversation = messages
     .slice(-6)
     .map((message) => `${message.role === "user" ? "User" : "Coach"}: ${String(message.content || "")}`)
     .join("\n");
 
   const prompt = [
-    "You are Step Zero's action agent inside a productivity app.",
-    "Your job is to propose a small batched bundle of board actions, not to take actions yourself.",
-    "Only use the allowed action types.",
-    "Prefer 2 to 4 actions per bundle.",
-    "Every action should be concrete, helpful, and safe to apply in the app.",
-    "Use update_task only for rewriting a task title, category, or open step wording.",
-    "Do not use update_task to mark steps complete or to simulate progress that the user has not approved.",
-    "Do not reference tools outside the app.",
-    "Do not suggest actions that require email, calendar, browser, or external systems.",
-    "When task ids or step ids are needed, reuse the exact ids from the provided board context.",
-    "If the board is nearly empty, create or shape tasks from what is already available.",
-    "Keep the summary and coachMessage concise and supportive.",
+    "You are Step Zero's selected-task planning assistant.",
+    "Plan only the selected task. Do not propose actions for other tasks.",
+    "Return a preview plan only; the app will ask the user before applying it.",
+    "Keep completed work intact by only suggesting a replacement for the selected task's open steps.",
+    "Use short, visible, realistic steps.",
+    "Prefer 3 to 5 suggested steps.",
+    "Use effort values low, medium, or high.",
+    "Use whole-number minutes between 1 and 30.",
+    "Keep summary and coachMessage concise and supportive.",
     "",
-    `Goal: ${goal}`,
     `Energy level: ${energy}`,
-    `Currently focused taskId: ${focus.taskId || "none"}`,
-    `Currently focused stepId: ${focus.stepId || "none"}`,
-    `Board summary: ${contextSummary || "No summary provided."}`,
-    "Open tasks:",
-    JSON.stringify(openTasks),
-    "Completed tasks:",
-    JSON.stringify(completedTasks),
-    "Recent board history:",
-    JSON.stringify(history.slice(0, 8).map((item) => ({
-      type: item.type,
-      summary: item.summary,
-      timestamp: item.timestamp,
-    }))),
-    "Recent coach chat:",
+    `Optional user instruction: ${instruction || "No extra instruction."}`,
+    `Board summary: ${boardSummary || "No summary provided."}`,
+    "Selected task:",
+    JSON.stringify(selectedTask),
+    "Recent selected-task chat:",
     conversation || "No recent chat.",
-    "",
-    "Allowed action types:",
-    "split_task, create_task, update_task, delete_task, reprioritize_tasks, set_focus, suggest_sprint, restore_task",
   ].join("\n");
 
-  const actionSchema = {
+  const stepSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
-      id: { type: "string" },
-      type: {
-        type: "string",
-        enum: [
-          "split_task",
-          "create_task",
-          "update_task",
-          "delete_task",
-          "reprioritize_tasks",
-          "set_focus",
-          "suggest_sprint",
-          "restore_task",
-        ],
-      },
       title: { type: "string" },
-      rationale: { type: "string" },
-      targetTaskId: { type: "string" },
-      targetStepId: { type: "string" },
-      targetCompletedTaskId: { type: "string" },
-      splitMode: { type: "string", enum: ["replace", "append"] },
-      duration: { type: "integer", minimum: 1, maximum: 30 },
-      order: {
-        type: "array",
-        items: { type: "string" },
-      },
-      affectedTaskTitles: {
-        type: "array",
-        items: { type: "string" },
-      },
-      task: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-          category: { type: "string" },
-          steps: {
-            type: "array",
-            items: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                title: { type: "string" },
-                effort: { type: "string", enum: ["low", "medium", "high"] },
-                minutes: { type: "integer", minimum: 1, maximum: 30 },
-              },
-              required: ["title", "effort", "minutes"],
-            },
-          },
-        },
-        required: ["title", "category", "steps"],
-      },
-      steps: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: { type: "string" },
-            effort: { type: "string", enum: ["low", "medium", "high"] },
-            minutes: { type: "integer", minimum: 1, maximum: 30 },
-          },
-          required: ["title", "effort", "minutes"],
-        },
-      },
+      effort: { type: "string", enum: ["low", "medium", "high"] },
+      minutes: { type: "integer", minimum: 1, maximum: 30 },
     },
-    required: ["id", "type", "title", "rationale"],
+    required: ["title", "effort", "minutes"],
   };
 
   const schema = {
     type: "object",
     additionalProperties: false,
     properties: {
-      runId: { type: "string" },
-      goal: { type: "string" },
+      taskId: { type: "string" },
       summary: { type: "string" },
       coachMessage: { type: "string" },
-      contextSummary: { type: "string" },
-      actions: {
+      suggestedTitle: { type: "string" },
+      suggestedCategory: { type: "string" },
+      suggestedSteps: {
         type: "array",
-        minItems: 1,
+        minItems: 2,
         maxItems: 5,
-        items: actionSchema,
+        items: stepSchema,
       },
     },
-    required: ["runId", "goal", "summary", "coachMessage", "actions"],
+    required: ["taskId", "summary", "coachMessage", "suggestedSteps"],
   };
 
   const data = await requestAIJson({
-    schemaName: "step_zero_agent_run",
+    schemaName: "step_zero_task_plan",
     schema,
     userPrompt: prompt,
   });

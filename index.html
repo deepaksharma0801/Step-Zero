@@ -81,16 +81,16 @@ call doctor"
                 <span class="hero-stat-label">sprints completed</span>
               </div>
             </div>
-            <p id="momentum-note" class="hero-note">Any progess is progress.</p>
+            <p id="momentum-note" class="hero-note">Any progress is progress.</p>
           </div>
 
           <section class="panel panel-next-step hero-guide-panel">
             <div class="section-heading section-heading-row">
               <div>
-                <p class="section-kicker">Agent Workspace</p>
-                <h2>Give Step Zero a goal and review the actions it proposes.</h2>
+                <p class="section-kicker">Selected Task Assistant</p>
+                <h2>Pick a task and work it through with Step Zero.</h2>
               </div>
-              <p class="section-note">Human-in-the-loop agent inside your board.</p>
+              <p id="assistant-mode" class="section-note">No task selected</p>
             </div>
             <div class="ai-setup hero-ai-setup">
               <div class="ai-setup-copy">
@@ -105,55 +105,58 @@ call doctor"
               <button class="energy-option" data-energy="medium">Steady</button>
               <button class="energy-option" data-energy="high">Locked in</button>
             </div>
-            <div class="agent-goal-block">
-              <div class="agent-goal-copy">
-                <p class="ai-copy-label">Agent goal</p>
-                <p class="ai-setup-note">Tell the agent what kind of help you want from the current board.</p>
-              </div>
-              <label class="sr-only" for="agent-goal">Agent goal</label>
-              <textarea
-                id="agent-goal"
-                class="agent-goal-input"
-                rows="3"
-                placeholder="Help me recover from overwhelm and get through the next 30 minutes."
-              ></textarea>
-              <div class="agent-goal-actions">
-                <button id="run-agent" class="button button-primary">Run agent</button>
-              </div>
+            <div id="assistant-empty" class="assistant-empty empty-state">
+              <p>Select a task from the board to open its assistant thread and planning tools.</p>
             </div>
-            <div class="agent-inbox-block">
-              <div class="section-heading section-heading-row agent-section-heading">
-                <div>
-                  <p class="ai-copy-label">Agent inbox</p>
-                  <h3>Review proposed actions before anything changes.</h3>
+            <div id="assistant-workspace" class="assistant-workspace hidden">
+              <div id="assistant-task-card" class="assistant-task-card"></div>
+              <div class="assistant-section">
+                <div class="section-heading section-heading-row assistant-section-heading">
+                  <div>
+                    <p class="ai-copy-label">Current open steps</p>
+                    <h3>The plan Step Zero can help reshape.</h3>
+                  </div>
                 </div>
-                <p id="agent-mode" class="section-note">Idle</p>
+                <div id="assistant-step-list" class="assistant-step-list"></div>
               </div>
-              <div id="agent-inbox" class="agent-inbox empty-state">
-                <p>Agent proposal bundles will show up here after you run a goal.</p>
-              </div>
-            </div>
-            <div class="agent-history-block">
-              <div class="section-heading section-heading-row agent-section-heading">
-                <div>
-                  <p class="ai-copy-label">Agent run history</p>
-                  <h3>What the agent tried and what you accepted.</h3>
+              <div class="assistant-section">
+                <div class="section-heading section-heading-row assistant-section-heading">
+                  <div>
+                    <p class="ai-copy-label">Plan preview</p>
+                    <h3>Generated steps wait here until you apply them.</h3>
+                  </div>
+                </div>
+                <div id="plan-preview" class="plan-preview empty-state">
+                  <p>No draft yet. Plan this task when you want a clearer path.</p>
+                </div>
+                <div class="plan-actions">
+                  <button id="plan-task" class="button button-primary">Plan this task</button>
+                  <button id="apply-selected-steps" class="button button-secondary">Apply selected</button>
+                  <button id="apply-all-steps" class="button button-secondary">Apply all</button>
+                  <button id="discard-plan" class="button button-ghost">Discard draft</button>
                 </div>
               </div>
-              <div id="agent-run-history" class="agent-run-history empty-state">
-                <p>Agent runs will be logged here once you start using them.</p>
-              </div>
-            </div>
-            <div class="agent-secondary">
-              <div class="section-heading section-heading-row agent-section-heading">
-                <div>
-                  <p class="ai-copy-label">Guidance companion</p>
-                  <h3>Use focused suggestions and chat when you want lighter support.</h3>
+              <div class="assistant-section">
+                <div class="ai-chat-header">
+                  <p class="ai-copy-label">Task chat</p>
+                  <p class="section-note ai-chat-note">Ask about this selected task.</p>
                 </div>
+                <div id="chat-thread" class="chat-thread empty-state">
+                  <p>This task's chat will show up here once you ask something.</p>
+                </div>
+                <form id="chat-form" class="chat-form">
+                  <label class="sr-only" for="chat-input">Ask the selected-task assistant a question</label>
+                  <textarea
+                    id="chat-input"
+                    class="chat-input"
+                    rows="3"
+                    placeholder="Break this down more gently."
+                  ></textarea>
+                  <div class="chat-actions">
+                    <button id="send-chat" type="submit" class="button button-primary">Ask assistant</button>
+                  </div>
+                </form>
               </div>
-            </div>
-            <div id="suggestion-card" class="suggestion-card empty">
-              <p class="suggestion-empty">Add a few tasks and Step Zero will pick a tiny next move.</p>
             </div>
             <div class="ai-response">
               <div class="ai-copy-block">
@@ -168,27 +171,6 @@ call doctor"
                   Your patterns and gentle nudges will show up here.
                 </p>
               </div>
-            </div>
-            <div class="ai-chat">
-              <div class="ai-chat-header">
-                <p class="ai-copy-label">Coach chat</p>
-                <p class="section-note ai-chat-note">Ask for help, reframing, or a gentler next move.</p>
-              </div>
-              <div id="chat-thread" class="chat-thread empty-state">
-                <p>The coach chat will show up here once you ask something.</p>
-              </div>
-              <form id="chat-form" class="chat-form">
-                <label class="sr-only" for="chat-input">Ask the AI coach a question</label>
-                <textarea
-                  id="chat-input"
-                  class="chat-input"
-                  rows="3"
-                  placeholder="I'm overwhelmed. What should I do first?"
-                ></textarea>
-                <div class="chat-actions">
-                  <button id="send-chat" type="submit" class="button button-primary">Ask coach</button>
-                </div>
-              </form>
             </div>
             <button id="pick-next-step" class="button button-primary button-full">Refresh guidance</button>
           </section>
@@ -306,6 +288,6 @@ call doctor"
       </article>
     </template>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=task-assistant"></script>
   </body>
 </html>

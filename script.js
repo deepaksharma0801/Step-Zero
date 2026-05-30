@@ -14,13 +14,12 @@ const state = {
   ui: {
     editingTaskId: null,
   },
-  agent: {
+  assistant: {
+    selectedTaskId: null,
+    taskThreadsById: {},
+    planDraftsByTaskId: {},
     mode: "idle",
-    goal: "",
-    contextSummary: "",
-    inbox: [],
-    runHistory: [],
-    lastAppliedRunId: null,
+    lastError: "",
   },
   preferences: {
     energy: "low",
@@ -42,7 +41,6 @@ const state = {
     coachMessage: "The AI coach will guide your next move here when it is ready.",
     insight: "Your patterns and gentle nudges will show up here.",
     guidanceReason: "",
-    chatMessages: [],
     isLoading: false,
     mode: "fallback",
   },
@@ -53,11 +51,16 @@ const elements = {
   draftPreview: document.querySelector("#draft-preview"),
   draftCount: document.querySelector("#draft-count"),
   generatePlan: document.querySelector("#generate-plan"),
-  runAgent: document.querySelector("#run-agent"),
-  agentGoal: document.querySelector("#agent-goal"),
-  agentMode: document.querySelector("#agent-mode"),
-  agentInbox: document.querySelector("#agent-inbox"),
-  agentRunHistory: document.querySelector("#agent-run-history"),
+  assistantMode: document.querySelector("#assistant-mode"),
+  assistantEmpty: document.querySelector("#assistant-empty"),
+  assistantWorkspace: document.querySelector("#assistant-workspace"),
+  assistantTaskCard: document.querySelector("#assistant-task-card"),
+  assistantStepList: document.querySelector("#assistant-step-list"),
+  planPreview: document.querySelector("#plan-preview"),
+  planTask: document.querySelector("#plan-task"),
+  applySelectedSteps: document.querySelector("#apply-selected-steps"),
+  applyAllSteps: document.querySelector("#apply-all-steps"),
+  discardPlan: document.querySelector("#discard-plan"),
   loadDemo: document.querySelector("#load-demo"),
   clearAll: document.querySelector("#clear-all"),
   taskList: document.querySelector("#task-list"),
@@ -117,16 +120,21 @@ function hydrateState() {
       if (typeof parsed.draftText === "string") {
         state.draftText = parsed.draftText;
       }
-      if (parsed.agent) {
-        state.agent = {
-          ...state.agent,
-          mode: parsed.agent.mode || state.agent.mode,
-          goal: parsed.agent.goal || "",
-          contextSummary: parsed.agent.contextSummary || "",
-          inbox: Array.isArray(parsed.agent.inbox) ? parsed.agent.inbox : [],
-          runHistory: Array.isArray(parsed.agent.runHistory) ? parsed.agent.runHistory : [],
-          lastAppliedRunId: parsed.agent.lastAppliedRunId || null,
+      if (parsed.assistant) {
+        state.assistant = {
+          ...state.assistant,
+          selectedTaskId: parsed.assistant.selectedTaskId || null,
+          taskThreadsById: isPlainObject(parsed.assistant.taskThreadsById)
+            ? parsed.assistant.taskThreadsById
+            : {},
+          planDraftsByTaskId: isPlainObject(parsed.assistant.planDraftsByTaskId)
+            ? parsed.assistant.planDraftsByTaskId
+            : {},
+          mode: parsed.assistant.mode || state.assistant.mode,
+          lastError: parsed.assistant.lastError || "",
         };
+      } else if (parsed.focus?.taskId) {
+        state.assistant.selectedTaskId = parsed.focus.taskId;
       }
       if (parsed.preferences?.energy) {
         state.preferences.energy = parsed.preferences.energy;
@@ -143,9 +151,6 @@ function hydrateState() {
           coachMessage: parsed.ai.coachMessage || state.ai.coachMessage,
           insight: parsed.ai.insight || state.ai.insight,
           guidanceReason: parsed.ai.guidanceReason || "",
-          chatMessages: Array.isArray(parsed.ai.chatMessages)
-            ? parsed.ai.chatMessages
-            : state.ai.chatMessages,
         };
       }
     } catch (error) {
@@ -154,7 +159,7 @@ function hydrateState() {
   }
 
   elements.brainDump.value = state.draftText;
-  elements.agentGoal.value = state.agent.goal;
+  syncAssistantSelection();
   updateTimerDisplay();
   syncEnergySelections();
   syncTimerSelections();
@@ -163,13 +168,6 @@ function hydrateState() {
 function bindEvents() {
   elements.generatePlan.addEventListener("click", () => {
     void handleGeneratePlan({ scrollToBoard: true });
-  });
-  elements.runAgent.addEventListener("click", () => {
-    void handleRunAgent();
-  });
-  elements.agentGoal.addEventListener("input", () => {
-    state.agent.goal = elements.agentGoal.value;
-    saveState();
   });
   elements.loadDemo.addEventListener("click", () => {
     setBrainDumpValue(DEMO_TEXT);
@@ -193,6 +191,12 @@ function bindEvents() {
       void handleChatSubmit();
     }
   });
+  elements.planTask.addEventListener("click", () => {
+    void handlePlanSelectedTask();
+  });
+  elements.applySelectedSteps.addEventListener("click", () => applySelectedDraftSteps());
+  elements.applyAllSteps.addEventListener("click", () => applyAllDraftSteps());
+  elements.discardPlan.addEventListener("click", () => discardCurrentPlanDraft());
   elements.startTimer.addEventListener("click", handleStartTimer);
   elements.pauseTimer.addEventListener("click", handlePauseTimer);
   elements.resetTimer.addEventListener("click", handleResetTimer);
@@ -230,8 +234,7 @@ function bindEvents() {
 
 async function checkAIAvailability() {
   try {
-    const response = await fetch("/api/health");
-    const data = await response.json();
+    const data = await requestJSON("/api/health");
 
     state.ai.available = Boolean(data.aiAvailable);
     state.ai.model = data.model || null;
@@ -321,13 +324,12 @@ function handleClearAll() {
   state.tasks = [];
   state.history = [];
   state.ui.editingTaskId = null;
-  state.agent = {
+  state.assistant = {
+    selectedTaskId: null,
+    taskThreadsById: {},
+    planDraftsByTaskId: {},
     mode: "idle",
-    goal: "",
-    contextSummary: "",
-    inbox: [],
-    runHistory: [],
-    lastAppliedRunId: null,
+    lastError: "",
   };
   setBrainDumpValue("");
   state.focus = { taskId: null, stepId: null };
@@ -677,6 +679,10 @@ function matches(text, words) {
   return words.some((word) => text.includes(word));
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function tidySentence(text) {
   const cleaned = String(text).replace(/\s+/g, " ").trim();
   if (!cleaned) {
@@ -708,6 +714,9 @@ function mergeTasks(nextTasks, existingTasks) {
 function ensureFocusedStep() {
   const focusedStep = getFocusedStep();
   if (focusedStep) {
+    if (!getSelectedAssistantTask()) {
+      state.assistant.selectedTaskId = state.focus.taskId;
+    }
     return;
   }
 
@@ -715,12 +724,16 @@ function ensureFocusedStep() {
   if (!firstOpenTask) {
     state.focus.taskId = null;
     state.focus.stepId = null;
+    syncAssistantSelection();
     return;
   }
 
   const firstOpenStep = getOpenSteps(firstOpenTask)[0];
   state.focus.taskId = firstOpenTask.id;
   state.focus.stepId = firstOpenStep?.id ?? null;
+  if (!getSelectedAssistantTask()) {
+    state.assistant.selectedTaskId = firstOpenTask.id;
+  }
 }
 
 function getOpenSteps(task) {
@@ -742,6 +755,25 @@ function getFocusedStep() {
   }
 
   return task.steps.find((step) => step.id === state.focus.stepId && !step.done) ?? null;
+}
+
+function getSelectedAssistantTask() {
+  return state.tasks.find((task) => task.id === state.assistant.selectedTaskId) ?? null;
+}
+
+function syncAssistantSelection() {
+  if (getSelectedAssistantTask()) {
+    return;
+  }
+
+  const focusedTask = getFocusedTask();
+  if (focusedTask) {
+    state.assistant.selectedTaskId = focusedTask.id;
+    return;
+  }
+
+  const firstOpenTask = state.tasks.find((task) => !isTaskDone(task));
+  state.assistant.selectedTaskId = firstOpenTask?.id || null;
 }
 
 function getSuggestedStep() {
@@ -844,6 +876,8 @@ function setFocus(taskId, stepId) {
   state.ui.editingTaskId = null;
   state.focus.taskId = taskId;
   state.focus.stepId = stepId;
+  state.assistant.selectedTaskId = taskId;
+  state.assistant.lastError = "";
   saveState();
   render();
 }
@@ -851,9 +885,10 @@ function setFocus(taskId, stepId) {
 function render() {
   syncEnergySelections();
   syncTimerSelections();
+  syncAssistantSelection();
   renderDraftPreview();
   renderAiPanel();
-  renderAgentPanel();
+  renderAssistantPanel();
   renderChatThread();
   renderTasks();
   renderCompletedTasks();
@@ -872,170 +907,119 @@ function renderAiPanel() {
   elements.coachInsight.textContent = state.ai.insight;
 }
 
-function renderAgentPanel() {
-  elements.agentGoal.value = state.agent.goal;
-  elements.agentMode.textContent = labelAgentMode(state.agent.mode);
-  renderAgentInbox();
-  renderAgentRunHistory();
-}
+function renderAssistantPanel() {
+  const task = getSelectedAssistantTask();
+  const hasTask = Boolean(task);
 
-function renderAgentInbox() {
-  const inbox = state.agent.inbox;
+  elements.assistantMode.textContent = hasTask
+    ? labelAssistantMode(state.assistant.mode)
+    : "No task selected";
+  elements.assistantEmpty.classList.toggle("hidden", hasTask);
+  elements.assistantWorkspace.classList.toggle("hidden", !hasTask);
 
-  if (!inbox.length) {
-    elements.agentInbox.className = "agent-inbox empty-state";
-    elements.agentInbox.innerHTML =
-      "<p>Agent proposal bundles will show up here after you run a goal.</p>";
+  if (!hasTask) {
+    elements.assistantTaskCard.innerHTML = "";
+    elements.assistantStepList.innerHTML = "";
+    elements.planPreview.innerHTML = "<p>No task selected.</p>";
     return;
   }
 
-  elements.agentInbox.className = "agent-inbox";
-  elements.agentInbox.innerHTML = "";
+  renderAssistantTaskCard(task);
+  renderAssistantStepList(task);
+  renderPlanPreview(task);
+}
 
-  inbox.forEach((bundle) => {
-    const card = document.createElement("article");
-    card.className = "agent-bundle";
+function renderAssistantTaskCard(task) {
+  const openStepCount = getOpenSteps(task).length;
+  elements.assistantTaskCard.innerHTML = `
+    <p class="assistant-task-label">${escapeHtml(task.category)}</p>
+    <h3>${escapeHtml(task.title)}</h3>
+    <p>${openStepCount} open step${openStepCount === 1 ? "" : "s"} on this task.</p>
+  `;
+}
 
-    const header = document.createElement("div");
-    header.className = "agent-bundle-header";
+function renderAssistantStepList(task) {
+  const openSteps = getOpenSteps(task);
 
-    const copy = document.createElement("div");
+  if (!openSteps.length) {
+    elements.assistantStepList.className = "assistant-step-list empty-state";
+    elements.assistantStepList.innerHTML = "<p>This task has no open steps.</p>";
+    return;
+  }
 
-    const title = document.createElement("h3");
-    title.className = "agent-bundle-title";
-    title.textContent = bundle.goal || "Agent proposal";
+  elements.assistantStepList.className = "assistant-step-list";
+  elements.assistantStepList.innerHTML = "";
 
-    const meta = document.createElement("p");
-    meta.className = "agent-bundle-meta";
-    meta.textContent = `${formatWhen(bundle.createdAt)}${bundle.contextSummary ? ` • ${bundle.contextSummary}` : ""}`;
-
-    const summary = document.createElement("p");
-    summary.className = "agent-bundle-summary";
-    summary.textContent = bundle.summary;
-
-    copy.append(title, meta, summary);
-
-    const headerActions = document.createElement("div");
-    headerActions.className = "agent-bundle-header-actions";
-
-    const applyAllButton = document.createElement("button");
-    applyAllButton.className = "button button-mini button-primary";
-    applyAllButton.textContent = "Apply all";
-    applyAllButton.disabled = !bundle.actions.some((action) => action.status === "pending");
-    applyAllButton.addEventListener("click", () => applyAllAgentActions(bundle.runId));
-
-    const dismissButton = document.createElement("button");
-    dismissButton.className = "button button-mini button-ghost";
-    dismissButton.textContent = "Dismiss bundle";
-    dismissButton.addEventListener("click", () => dismissAgentBundle(bundle.runId));
-
-    headerActions.append(applyAllButton, dismissButton);
-    header.append(copy, headerActions);
-
-    const coachMessage = document.createElement("p");
-    coachMessage.className = "agent-bundle-coach";
-    coachMessage.textContent = bundle.coachMessage;
-
-    const actionList = document.createElement("div");
-    actionList.className = "agent-action-list";
-
-    bundle.actions.forEach((action) => {
-      const row = document.createElement("div");
-      row.className = `agent-action agent-action-${action.status || "pending"}`;
-
-      const rowCopy = document.createElement("div");
-      rowCopy.className = "agent-action-copy";
-
-      const rowTitle = document.createElement("p");
-      rowTitle.className = "agent-action-title";
-      rowTitle.textContent = action.title || describeAgentAction(action);
-
-      const rowType = document.createElement("p");
-      rowType.className = "agent-action-type";
-      rowType.textContent = `${formatAgentActionType(action.type)} • ${labelAgentActionStatus(action.status || "pending")}`;
-
-      const rowRationale = document.createElement("p");
-      rowRationale.className = "agent-action-rationale";
-      rowRationale.textContent = action.rationale || "No rationale provided.";
-
-      rowCopy.append(rowTitle, rowType, rowRationale);
-
-      if (Array.isArray(action.affectedTaskTitles) && action.affectedTaskTitles.length) {
-        const affected = document.createElement("p");
-        affected.className = "agent-action-affected";
-        affected.textContent = `Touches: ${action.affectedTaskTitles.join(", ")}`;
-        rowCopy.append(affected);
-      }
-
-      if (action.error) {
-        const error = document.createElement("p");
-        error.className = "agent-action-error";
-        error.textContent = action.error;
-        rowCopy.append(error);
-      }
-
-      const rowActions = document.createElement("div");
-      rowActions.className = "agent-action-buttons";
-
-      const applyButton = document.createElement("button");
-      applyButton.className = "button button-mini button-secondary";
-      applyButton.textContent = "Apply";
-      applyButton.disabled = action.status !== "pending";
-      applyButton.addEventListener("click", () => applyAgentAction(bundle.runId, action.id));
-
-      const rejectButton = document.createElement("button");
-      rejectButton.className = "button button-mini button-ghost";
-      rejectButton.textContent = "Reject";
-      rejectButton.disabled = action.status !== "pending";
-      rejectButton.addEventListener("click", () => rejectAgentAction(bundle.runId, action.id));
-
-      rowActions.append(applyButton, rejectButton);
-      row.append(rowCopy, rowActions);
-      actionList.append(row);
-    });
-
-    card.append(header, coachMessage, actionList);
-    elements.agentInbox.append(card);
+  openSteps.forEach((step) => {
+    const item = document.createElement("div");
+    item.className = "assistant-step-item";
+    item.innerHTML = `
+      <p>${escapeHtml(step.title)}</p>
+      <span>${labelEffort(step.effort)} lift • ${step.minutes} min</span>
+    `;
+    elements.assistantStepList.append(item);
   });
 }
 
-function renderAgentRunHistory() {
-  const runs = state.agent.runHistory;
+function renderPlanPreview(task) {
+  const draft = getPlanDraft(task.id);
 
-  if (!runs.length) {
-    elements.agentRunHistory.className = "agent-run-history empty-state";
-    elements.agentRunHistory.innerHTML =
-      "<p>Agent runs will be logged here once you start using them.</p>";
+  if (!draft) {
+    elements.planPreview.className = "plan-preview empty-state";
+    elements.planPreview.innerHTML = state.assistant.lastError
+      ? `<p>${escapeHtml(state.assistant.lastError)}</p>`
+      : "<p>No draft yet. Plan this task when you want a clearer path.</p>";
     return;
   }
 
-  elements.agentRunHistory.className = "agent-run-history";
-  elements.agentRunHistory.innerHTML = "";
+  elements.planPreview.className = "plan-preview";
+  elements.planPreview.innerHTML = "";
 
-  runs.forEach((run) => {
-    const item = document.createElement("div");
-    item.className = "agent-history-item";
+  const summary = document.createElement("div");
+  summary.className = "plan-summary";
+  summary.innerHTML = `
+    <p class="plan-summary-title">${escapeHtml(draft.summary)}</p>
+    <p>${escapeHtml(draft.coachMessage)}</p>
+  `;
+  elements.planPreview.append(summary);
 
-    const title = document.createElement("p");
-    title.className = "agent-history-title";
-    title.textContent = run.goal;
+  draft.suggestedSteps.forEach((step, index) => {
+    const row = document.createElement("label");
+    row.className = "plan-step-row";
 
-    const meta = document.createElement("p");
-    meta.className = "agent-history-meta";
-    meta.textContent = `${formatWhen(run.timestamp)} • ${labelAgentHistoryOutcome(run.outcome)}`;
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = step.selected !== false;
+    checkbox.dataset.stepIndex = String(index);
+    checkbox.addEventListener("change", () => updateDraftStepSelection(task.id, index, checkbox.checked));
 
-    item.append(title, meta);
-    elements.agentRunHistory.append(item);
+    const copy = document.createElement("span");
+    copy.className = "plan-step-copy";
+    copy.innerHTML = `
+      <strong>${escapeHtml(step.title)}</strong>
+      <span>${labelEffort(step.effort)} lift • ${step.minutes} min</span>
+    `;
+
+    row.append(checkbox, copy);
+    elements.planPreview.append(row);
   });
 }
 
 function renderChatThread() {
-  const messages = state.ai.chatMessages;
+  const task = getSelectedAssistantTask();
+  const messages = task ? getAssistantThread(task.id) : [];
+
+  if (!task) {
+    elements.chatThread.className = "chat-thread empty-state";
+    elements.chatThread.innerHTML =
+      "<p>Select a task to open its assistant chat.</p>";
+    return;
+  }
 
   if (!messages.length) {
     elements.chatThread.className = "chat-thread empty-state";
     elements.chatThread.innerHTML =
-      "<p>The coach chat will show up here once you ask something.</p>";
+      "<p>This task's chat will show up here once you ask something.</p>";
     return;
   }
 
@@ -1318,119 +1302,95 @@ function renderCompletedTasks() {
   });
 }
 
-async function handleRunAgent() {
+async function handlePlanSelectedTask() {
   if (state.ai.isLoading) {
     return;
   }
 
-  const goal = elements.agentGoal.value.trim();
-  if (!goal) {
-    elements.agentGoal.focus();
+  const task = getSelectedAssistantTask();
+  if (!task) {
+    state.assistant.lastError = "Select a task before asking Step Zero to plan it.";
+    render();
     return;
   }
 
-  state.agent.goal = goal;
-  state.agent.mode = "drafting";
-  state.agent.contextSummary = buildAgentContextSummary();
-  saveState();
-  render();
-
   if (!canUseAI()) {
-    injectFallbackAgentBundle(goal);
+    setFallbackPlanDraft(task);
     return;
   }
 
   try {
-    setAiLoading("Agent is reading the board and drafting a proposal bundle...");
-    const data = await fetchJSON("/api/agent/run", {
-      goal,
+    state.assistant.mode = "planning";
+    state.assistant.lastError = "";
+    setAiLoading("AI assistant is planning this selected task...");
+
+    const data = await fetchJSON("/api/task-plan", {
+      selectedTask: buildSelectedTaskPayload(task),
       energy: state.preferences.energy,
-      focus: state.focus,
-      openTasks: buildOpenTaskPayload(),
-      completedTasks: buildCompletedTaskSummary(),
-      history: state.history.slice(0, 8),
-      chatMessages: state.ai.chatMessages.slice(-6),
-      contextSummary: state.agent.contextSummary,
+      boardSummary: buildBoardSummary(),
+      messages: getAssistantThread(task.id).slice(-6),
     });
 
-    const bundle = normalizeAgentBundle(data, goal, state.agent.contextSummary);
-    state.agent.inbox.unshift(bundle);
-    state.agent.inbox = state.agent.inbox.slice(0, 8);
-    state.agent.mode = "awaiting_approval";
+    state.assistant.planDraftsByTaskId[task.id] = normalizeTaskPlanDraft(data, task);
+    state.assistant.mode = "previewing";
+    state.ai.coachMessage = data.coachMessage || "Review the draft and apply only the steps you want.";
+    state.ai.insight = "Planning is still just a preview until you apply it.";
     state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
     state.ai.mode = "live";
     state.ai.isLoading = false;
-    recordAgentRun(goal, "drafted");
     saveState();
     render();
   } catch (error) {
     console.error(error);
-    injectFallbackAgentBundle(goal);
+    state.assistant.mode = "idle";
+    state.assistant.lastError = "AI planning was unavailable, so Step Zero made a built-in draft instead.";
+    setAiFallback(state.assistant.lastError);
+    setFallbackPlanDraft(task);
   }
 }
 
-function normalizeAgentBundle(data, goal, contextSummary) {
-  const actions = Array.isArray(data.actions) ? data.actions.map(normalizeAgentAction) : [];
-  return {
-    runId: String(data.runId || crypto.randomUUID()),
-    goal: String(data.goal || goal),
-    summary: String(data.summary || "Step Zero drafted a set of possible board updates."),
-    coachMessage: String(data.coachMessage || "Review the bundle and apply only what feels useful."),
-    contextSummary: String(data.contextSummary || contextSummary || ""),
+function setFallbackPlanDraft(task) {
+  const fallback = buildFallbackBreakdown(task.title);
+  state.assistant.planDraftsByTaskId[task.id] = {
+    taskId: task.id,
+    summary: "Built-in task plan draft.",
+    coachMessage: "AI is offline, so this draft uses Step Zero's built-in planning logic.",
+    suggestedTitle: task.title,
+    suggestedCategory: task.category || fallback.category,
+    suggestedSteps: fallback.steps.map((step) => ({
+      title: step.title,
+      effort: normalizeEffort(step.effort),
+      minutes: normalizeMinutes(step.minutes),
+      selected: true,
+    })),
     createdAt: new Date().toISOString(),
-    actions,
   };
+  state.assistant.mode = "previewing";
+  saveState();
+  render();
 }
 
-function normalizeAgentAction(action) {
-  const normalizedTask = action?.task && typeof action.task === "object"
-    ? normalizeAgentTaskPayload(action.task)
-    : null;
-  const normalizedSteps = Array.isArray(action?.steps)
-    ? action.steps
-      .map((step) => normalizeAgentStepPayload(step))
-      .filter(Boolean)
+function normalizeTaskPlanDraft(data, task) {
+  const steps = Array.isArray(data.suggestedSteps)
+    ? data.suggestedSteps.map(normalizeAssistantStepPayload).filter(Boolean)
     : [];
 
-  return {
-    id: String(action?.id || crypto.randomUUID()),
-    type: String(action?.type || "update_task"),
-    title: String(action?.title || "").trim() || null,
-    rationale: String(action?.rationale || "").trim() || null,
-    targetTaskId: action?.targetTaskId ? String(action.targetTaskId) : null,
-    targetStepId: action?.targetStepId ? String(action.targetStepId) : null,
-    targetCompletedTaskId: action?.targetCompletedTaskId ? String(action.targetCompletedTaskId) : null,
-    task: normalizedTask,
-    steps: normalizedSteps,
-    splitMode: action?.splitMode === "append" ? "append" : "replace",
-    order: Array.isArray(action?.order) ? action.order.map((id) => String(id)) : [],
-    duration: normalizeMinutes(action?.duration || action?.minutes || 10),
-    affectedTaskTitles: Array.isArray(action?.affectedTaskTitles)
-      ? action.affectedTaskTitles.map((value) => tidySentence(value)).filter(Boolean)
-      : deriveAffectedTaskTitles(action, normalizedTask),
-    status: "pending",
-    error: "",
-  };
-}
-
-function normalizeAgentTaskPayload(task) {
-  const title = tidySentence(task?.title || "");
-  if (!title) {
-    return null;
+  if (!steps.length) {
+    throw new Error("Task plan did not include usable steps.");
   }
 
-  const steps = Array.isArray(task?.steps)
-    ? task.steps.map((step) => normalizeAgentStepPayload(step)).filter(Boolean)
-    : [];
-
   return {
-    title,
-    category: tidySentence(task?.category || "General"),
-    steps,
+    taskId: String(data.taskId || task.id),
+    summary: String(data.summary || "Step Zero drafted a new step plan."),
+    coachMessage: String(data.coachMessage || "Review the steps before applying them."),
+    suggestedTitle: data.suggestedTitle ? tidySentence(data.suggestedTitle) : task.title,
+    suggestedCategory: data.suggestedCategory ? tidySentence(data.suggestedCategory) : task.category,
+    suggestedSteps: steps.map((step) => ({ ...step, selected: true })),
+    createdAt: new Date().toISOString(),
   };
 }
 
-function normalizeAgentStepPayload(step) {
+function normalizeAssistantStepPayload(step) {
   const title = tidySentence(step?.title || "");
   if (!title) {
     return null;
@@ -1443,442 +1403,104 @@ function normalizeAgentStepPayload(step) {
   };
 }
 
-function deriveAffectedTaskTitles(action, normalizedTask) {
-  const titles = [];
-  if (normalizedTask?.title) {
-    titles.push(normalizedTask.title);
+function getPlanDraft(taskId) {
+  const draft = state.assistant.planDraftsByTaskId[taskId];
+  if (!draft || !Array.isArray(draft.suggestedSteps)) {
+    return null;
   }
-  const targetTask = state.tasks.find((task) => task.id === action?.targetTaskId);
-  if (targetTask?.title) {
-    titles.push(targetTask.title);
-  }
-  const completedTask = state.tasks.find((task) => task.id === action?.targetCompletedTaskId);
-  if (completedTask?.title) {
-    titles.push(completedTask.title);
-  }
-  return [...new Set(titles)];
+  return draft;
 }
 
-function injectFallbackAgentBundle(goal) {
-  const fallbackActions = buildFallbackAgentActions(goal);
-  const bundle = {
-    runId: crypto.randomUUID(),
-    goal,
-    summary: "Step Zero drafted a fallback action bundle using the current board.",
-    coachMessage: "AI was unavailable, so this bundle uses built-in logic. You can still apply only the parts you want.",
-    contextSummary: buildAgentContextSummary(),
-    createdAt: new Date().toISOString(),
-    actions: fallbackActions.map(normalizeAgentAction),
-  };
-
-  state.agent.inbox.unshift(bundle);
-  state.agent.inbox = state.agent.inbox.slice(0, 8);
-  state.agent.mode = "awaiting_approval";
-  state.ai.isLoading = false;
-  state.ai.mode = "fallback";
-  state.ai.statusText = "Agent AI was unavailable, so Step Zero drafted a built-in proposal bundle instead.";
-  recordAgentRun(goal, "fallback_bundle");
-  saveState();
-  render();
-}
-
-function buildFallbackAgentActions(goal) {
-  const actions = [];
-  const suggestion = getSuggestedStep();
-  const firstOpenTask = state.tasks.find((task) => !isTaskDone(task));
-
-  if (!state.tasks.length && state.draftText.trim()) {
-    const draftTasks = splitEntries(state.draftText).slice(0, 3).map((entry) => createTaskFromEntry(entry));
-    draftTasks.forEach((task) => {
-      actions.push({
-        type: "create_task",
-        title: `Create "${task.title}"`,
-        rationale: "You already named this in the draft area, so the fastest move is to bring it into the board.",
-        task: {
-          title: task.title,
-          category: task.category,
-          steps: task.steps.map((step) => ({
-            title: step.title,
-            effort: step.effort,
-            minutes: step.minutes,
-          })),
-        },
-      });
-    });
-  }
-
-  if (firstOpenTask) {
-    actions.push({
-      type: "set_focus",
-      title: `Focus ${firstOpenTask.title}`,
-      rationale: "A clear target reduces friction before you start a sprint.",
-      targetTaskId: firstOpenTask.id,
-      targetStepId: getOpenSteps(firstOpenTask)[0]?.id || null,
-      affectedTaskTitles: [firstOpenTask.title],
-    });
-
-    actions.push({
-      type: "suggest_sprint",
-      title: "Set a 10-minute sprint",
-      rationale: "A short sprint is usually enough to create motion without overwhelming the board.",
-      targetTaskId: firstOpenTask.id,
-      targetStepId: getOpenSteps(firstOpenTask)[0]?.id || null,
-      duration: 10,
-      affectedTaskTitles: [firstOpenTask.title],
-    });
-  }
-
-  if (suggestion) {
-    actions.push({
-      type: "update_task",
-      title: `Tighten ${suggestion.task.title}`,
-      rationale: `Goal noted: "${goal}". This task can be made easier to start by making its top step more concrete.`,
-      targetTaskId: suggestion.task.id,
-      steps: [
-        {
-          title: `Open what you need for ${suggestion.task.title.toLowerCase()}.`,
-          effort: "low",
-          minutes: 2,
-        },
-        ...suggestion.task.steps
-          .filter((step) => !step.done)
-          .slice(1, 4)
-          .map((step) => ({
-            title: step.title,
-            effort: step.effort,
-            minutes: step.minutes,
-          })),
-      ],
-      affectedTaskTitles: [suggestion.task.title],
-    });
-  }
-
-  if (!actions.length) {
-    actions.push({
-      type: "create_task",
-      title: "Create a starter task",
-      rationale: `The board is almost empty, so the cleanest first move for "${goal}" is to create one concrete starting task.`,
-      task: {
-        title: tidySentence(goal) || "Starter task",
-        category: "General",
-        steps: [
-          { title: "Open what you need to begin.", effort: "low", minutes: 2 },
-          { title: "Define the smallest visible first move.", effort: "low", minutes: 4 },
-          { title: "Do one focused pass.", effort: "medium", minutes: 10 },
-        ],
-      },
-    });
-  }
-
-  return actions.slice(0, 4);
-}
-
-function applyAgentAction(runId, actionId) {
-  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
-  const action = bundle?.actions.find((entry) => entry.id === actionId);
-  if (!bundle || !action || action.status !== "pending") {
+function updateDraftStepSelection(taskId, index, selected) {
+  const draft = getPlanDraft(taskId);
+  if (!draft?.suggestedSteps[index]) {
     return;
   }
 
-  state.agent.mode = "applying";
-  const result = executeAgentAction(action);
-
-  if (result.ok) {
-    action.status = "applied";
-    action.error = "";
-    state.agent.lastAppliedRunId = runId;
-    recordHistory("reset", `Agent applied: ${action.title || describeAgentAction(action)}.`);
-    recordAgentRun(bundle.goal, "partial_apply");
-  } else {
-    action.status = "invalid";
-    action.error = result.error;
-    recordAgentRun(bundle.goal, "invalid_action");
-  }
-
-  finalizeAgentBundleState(bundle);
-  ensureFocusedStep();
+  draft.suggestedSteps[index].selected = selected;
   saveState();
-  render();
 }
 
-function applyAllAgentActions(runId) {
-  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
-  if (!bundle) {
+function applySelectedDraftSteps() {
+  const task = getSelectedAssistantTask();
+  const draft = task ? getPlanDraft(task.id) : null;
+  const steps = draft?.suggestedSteps.filter((step) => step.selected !== false) || [];
+  applyDraftSteps(task, draft, steps);
+}
+
+function applyAllDraftSteps() {
+  const task = getSelectedAssistantTask();
+  const draft = task ? getPlanDraft(task.id) : null;
+  applyDraftSteps(task, draft, draft?.suggestedSteps || []);
+}
+
+function applyDraftSteps(task, draft, steps) {
+  if (!task || !draft) {
+    state.assistant.lastError = "No task plan draft is available to apply.";
+    render();
     return;
   }
 
-  state.agent.mode = "applying";
-  bundle.actions
-    .filter((action) => action.status === "pending")
-    .forEach((action) => {
-      const result = executeAgentAction(action);
-      if (result.ok) {
-        action.status = "applied";
-        action.error = "";
-      } else {
-        action.status = "invalid";
-        action.error = result.error;
-      }
-    });
-
-  state.agent.lastAppliedRunId = runId;
-  finalizeAgentBundleState(bundle);
-  const appliedCount = bundle.actions.filter((action) => action.status === "applied").length;
-  recordHistory("reset", `Agent applied ${appliedCount} action${appliedCount === 1 ? "" : "s"} from one bundle.`);
-  recordAgentRun(bundle.goal, appliedCount ? "apply_all" : "invalid_action");
-  ensureFocusedStep();
-  saveState();
-  render();
-}
-
-function rejectAgentAction(runId, actionId) {
-  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
-  const action = bundle?.actions.find((entry) => entry.id === actionId);
-  if (!bundle || !action || action.status !== "pending") {
+  const normalizedSteps = steps.map(normalizeAssistantStepPayload).filter(Boolean);
+  if (!normalizedSteps.length) {
+    state.assistant.lastError = "Select at least one generated step before applying.";
+    render();
     return;
   }
 
-  action.status = "rejected";
-  action.error = "";
-  finalizeAgentBundleState(bundle);
-  recordAgentRun(bundle.goal, "partial_reject");
-  saveState();
-  render();
-}
-
-function dismissAgentBundle(runId) {
-  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
-  state.agent.inbox = state.agent.inbox.filter((entry) => entry.runId !== runId);
-  if (bundle) {
-    recordAgentRun(bundle.goal, "dismissed");
-  }
-  state.agent.mode = state.agent.inbox.length ? "awaiting_approval" : "idle";
-  saveState();
-  render();
-}
-
-function finalizeAgentBundleState(bundle) {
-  const hasPending = bundle.actions.some((action) => action.status === "pending");
-  state.agent.mode = hasPending ? "awaiting_approval" : "idle";
-}
-
-function executeAgentAction(action) {
-  switch (action.type) {
-    case "create_task":
-      return executeCreateTaskAction(action);
-    case "update_task":
-      return executeUpdateTaskAction(action);
-    case "split_task":
-      return executeSplitTaskAction(action);
-    case "delete_task":
-      return executeDeleteTaskAction(action);
-    case "reprioritize_tasks":
-      return executeReprioritizeAction(action);
-    case "set_focus":
-      return executeSetFocusAction(action);
-    case "suggest_sprint":
-      return executeSuggestSprintAction(action);
-    case "restore_task":
-      return executeRestoreTaskAction(action);
-    default:
-      return { ok: false, error: `Unknown action type: ${action.type}` };
-  }
-}
-
-function executeCreateTaskAction(action) {
-  if (!action.task?.title) {
-    return { ok: false, error: "Missing task payload for create action." };
-  }
-
-  const exists = state.tasks.some(
-    (task) => task.title.toLowerCase() === action.task.title.toLowerCase()
-  );
-  if (exists) {
-    return { ok: false, error: "A task with this title already exists on the board." };
-  }
-
-  const task = createTaskFromAiTask(action.task);
-  state.tasks.push(task);
-  return { ok: true };
-}
-
-function executeUpdateTaskAction(action) {
-  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
-  if (!task) {
-    return { ok: false, error: "That task no longer exists on the board." };
-  }
-
-  const hasTaskUpdate = Boolean(action.task?.title || action.task?.category);
-  const nextStepsSource = action.steps.length ? action.steps : action.task?.steps || [];
-  if (!hasTaskUpdate && !nextStepsSource.length) {
-    return { ok: false, error: "This update action did not include any editable task changes." };
-  }
-
-  if (action.task?.title) {
-    task.title = action.task.title;
-  }
-  if (action.task?.category) {
-    task.category = action.task.category;
-  }
-
-  if (nextStepsSource.length) {
-    const existingOpenSteps = task.steps.filter((step) => step.done);
-    const rebuiltOpenSteps = nextStepsSource.slice(0, 4).map((step) => ({
-      id: crypto.randomUUID(),
-      title: tidySentence(step.title),
-      effort: normalizeEffort(step.effort),
-      minutes: normalizeMinutes(step.minutes),
-      done: false,
-      completedAt: null,
-    }));
-    task.steps = [...existingOpenSteps, ...rebuiltOpenSteps];
-  }
-
-  return { ok: true };
-}
-
-function executeSplitTaskAction(action) {
-  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
-  if (!task) {
-    return { ok: false, error: "That task no longer exists on the board." };
-  }
-
-  if (!action.steps.length) {
-    return { ok: false, error: "No replacement steps were provided for this split action." };
-  }
-
+  state.assistant.mode = "applying";
   const completedSteps = task.steps.filter((step) => step.done);
-  const newOpenSteps = action.steps.slice(0, 4).map((step) => ({
+  const nextOpenSteps = normalizedSteps.map((step) => ({
     id: crypto.randomUUID(),
-    title: tidySentence(step.title),
-    effort: normalizeEffort(step.effort),
-    minutes: normalizeMinutes(step.minutes),
+    title: step.title,
+    effort: step.effort,
+    minutes: step.minutes,
     done: false,
     completedAt: null,
   }));
 
-  if (action.splitMode === "append") {
-    const currentOpenSteps = task.steps.filter((step) => !step.done);
-    task.steps = [...completedSteps, ...currentOpenSteps, ...newOpenSteps].slice(0, completedSteps.length + 4);
-  } else {
-    task.steps = [...completedSteps, ...newOpenSteps];
+  task.title = draft.suggestedTitle || task.title;
+  task.category = draft.suggestedCategory || task.category;
+  task.steps = [...completedSteps, ...nextOpenSteps];
+
+  if (state.focus.taskId === task.id) {
+    state.focus.stepId = nextOpenSteps[0]?.id || null;
   }
 
-  return { ok: true };
+  state.assistant.selectedTaskId = task.id;
+  delete state.assistant.planDraftsByTaskId[task.id];
+  state.assistant.mode = "idle";
+  state.assistant.lastError = "";
+  state.ai.coachMessage = `Updated "${task.title}" with ${nextOpenSteps.length} planned step${nextOpenSteps.length === 1 ? "" : "s"}.`;
+  state.ai.insight = "Completed steps stayed intact; only the open plan changed.";
+  recordHistory("reset", `Applied a task plan to ${task.title}.`, task.title);
+  ensureFocusedStep();
+  saveState();
+  render();
 }
 
-function executeDeleteTaskAction(action) {
-  const taskIndex = state.tasks.findIndex((entry) => entry.id === action.targetTaskId);
-  if (taskIndex === -1) {
-    return { ok: false, error: "That task was already removed." };
-  }
-
-  const [removedTask] = state.tasks.splice(taskIndex, 1);
-  if (state.focus.taskId === removedTask.id) {
-    state.focus.taskId = null;
-    state.focus.stepId = null;
-  }
-  return { ok: true };
-}
-
-function executeReprioritizeAction(action) {
-  if (!action.order.length) {
-    return { ok: false, error: "No task order was provided for reprioritization." };
-  }
-
-  const orderIndex = new Map(action.order.map((id, index) => [id, index]));
-  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
-  const completedTasks = state.tasks.filter((task) => isTaskDone(task));
-  const missing = action.order.some((id) => !openTasks.find((task) => task.id === id));
-
-  if (missing) {
-    return { ok: false, error: "One or more tasks in the proposed order no longer exist." };
-  }
-
-  const reorderedOpen = [...openTasks].sort((a, b) => {
-    const aIndex = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
-    const bIndex = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
-    return aIndex - bIndex;
-  });
-
-  state.tasks = [...reorderedOpen, ...completedTasks];
-  return { ok: true };
-}
-
-function executeSetFocusAction(action) {
-  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
+function discardCurrentPlanDraft() {
+  const task = getSelectedAssistantTask();
   if (!task) {
-    return { ok: false, error: "The proposed focus task is no longer on the board." };
+    return;
   }
 
-  const step = action.targetStepId
-    ? task.steps.find((entry) => entry.id === action.targetStepId && !entry.done)
-    : getOpenSteps(task)[0];
-  if (!step) {
-    return { ok: false, error: "The proposed focus step is no longer available." };
-  }
-
-  state.focus.taskId = task.id;
-  state.focus.stepId = step.id;
-  return { ok: true };
-}
-
-function executeSuggestSprintAction(action) {
-  const focusResult = executeSetFocusAction(action);
-  if (!focusResult.ok) {
-    return focusResult;
-  }
-
-  state.timer.selectedDuration = normalizeMinutes(action.duration);
-  state.timer.remainingSeconds = state.timer.selectedDuration * 60;
-  return { ok: true };
-}
-
-function executeRestoreTaskAction(action) {
-  const task = state.tasks.find((entry) => entry.id === (action.targetCompletedTaskId || action.targetTaskId));
-  if (!task) {
-    return { ok: false, error: "The completed task is no longer available to restore." };
-  }
-
-  task.steps.forEach((step) => {
-    step.done = false;
-    step.completedAt = null;
-  });
-
-  return { ok: true };
-}
-
-function buildAgentContextSummary() {
-  const openTasks = state.tasks.filter((task) => !isTaskDone(task)).length;
-  const completedTasks = state.tasks.filter((task) => isTaskDone(task)).length;
-  const openSteps = state.tasks.reduce((count, task) => count + getOpenSteps(task).length, 0);
-  return `${openTasks} open tasks, ${completedTasks} completed tasks, ${openSteps} unfinished steps, energy ${state.preferences.energy}`;
-}
-
-function buildCompletedTaskSummary() {
-  return state.tasks
-    .filter((task) => isTaskDone(task))
-    .slice(-6)
-    .map((task) => ({
-      id: task.id,
-      title: task.title,
-      category: task.category,
-      completedAt: formatCompletedTaskTime(task),
-    }));
-}
-
-function recordAgentRun(goal, outcome) {
-  state.agent.runHistory.unshift({
-    id: crypto.randomUUID(),
-    goal,
-    outcome,
-    timestamp: new Date().toISOString(),
-  });
-  state.agent.runHistory = state.agent.runHistory.slice(0, 12);
+  delete state.assistant.planDraftsByTaskId[task.id];
+  state.assistant.mode = "idle";
+  state.assistant.lastError = "";
+  saveState();
+  render();
 }
 
 async function handleChatSubmit() {
   if (state.ai.isLoading) {
+    return;
+  }
+
+  const task = getSelectedAssistantTask();
+  if (!task) {
+    state.assistant.lastError = "Select a task before chatting with the assistant.";
+    render();
     return;
   }
 
@@ -1888,30 +1510,33 @@ async function handleChatSubmit() {
     return;
   }
 
-  pushChatMessage("user", content);
+  pushChatMessage(task.id, "user", content);
   elements.chatInput.value = "";
 
   if (!canUseAI()) {
-    pushChatMessage("assistant", buildFallbackChatReply(content));
-    state.ai.statusText = "AI coach chat is offline right now, so Step Zero is answering with built-in support.";
+    pushChatMessage(task.id, "assistant", buildFallbackChatReply(content, task));
+    state.ai.statusText = "AI task chat is offline right now, so Step Zero is answering with built-in support.";
     saveState();
     render();
     return;
   }
 
   try {
-    setAiLoading("AI coach is reading your board and writing back...");
+    state.assistant.mode = "chatting";
+    setAiLoading("AI assistant is reading this task and writing back...");
     renderChatThread();
 
     const data = await fetchJSON("/api/chat", {
       energy: state.preferences.energy,
-      focus: state.focus,
+      selectedTask: buildSelectedTaskPayload(task),
+      boardTasks: buildOpenTaskPayload(),
       history: state.history.slice(0, 8),
-      tasks: buildOpenTaskPayload(),
-      messages: state.ai.chatMessages.slice(-8),
+      messages: getAssistantThread(task.id).slice(-8),
     });
 
-    pushChatMessage("assistant", data.reply);
+    pushChatMessage(task.id, "assistant", data.reply);
+    state.assistant.mode = "idle";
+    state.assistant.lastError = "";
     state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
     state.ai.mode = "live";
     state.ai.isLoading = false;
@@ -1919,8 +1544,10 @@ async function handleChatSubmit() {
     render();
   } catch (error) {
     console.error(error);
-    setAiFallback("AI coach chat hit a snag, so Step Zero switched back to built-in support.");
-    pushChatMessage("assistant", buildFallbackChatReply(content));
+    state.assistant.mode = "idle";
+    state.assistant.lastError = "AI task chat hit a snag, so Step Zero used built-in support.";
+    setAiFallback(state.assistant.lastError);
+    pushChatMessage(task.id, "assistant", buildFallbackChatReply(content, task));
     saveState();
     render();
   }
@@ -1992,6 +1619,10 @@ function deleteTask(taskId) {
     state.focus.taskId = null;
     state.focus.stepId = null;
   }
+  if (state.assistant.selectedTaskId === taskId) {
+    state.assistant.selectedTaskId = null;
+    state.assistant.lastError = "";
+  }
 
   ensureFocusedStep();
   recordHistory("reset", `Removed task: ${task.title}.`);
@@ -2028,7 +1659,11 @@ function removeTaskPermanently(taskId) {
   }
 
   state.tasks = state.tasks.filter((entry) => entry.id !== taskId);
+  if (state.assistant.selectedTaskId === taskId) {
+    state.assistant.selectedTaskId = null;
+  }
   recordHistory("reset", `Archived and removed ${task.title}.`);
+  syncAssistantSelection();
   saveState();
   render();
 }
@@ -2123,41 +1758,77 @@ function buildFallbackInsight() {
   return `You are currently set to ${state.preferences.energy} energy, so Step Zero is leaning toward lighter, shorter moves first.`;
 }
 
-function buildFallbackChatReply(message) {
+function buildFallbackChatReply(message, task = getSelectedAssistantTask()) {
   const lower = message.toLowerCase();
-  const suggestion = getSuggestedStep();
+  const firstOpenStep = task ? getOpenSteps(task)[0] : null;
 
-  if (!state.tasks.length) {
-    return "Start by dropping in two or three tasks, then ask me to break them down. We only need a small starting point.";
+  if (!task) {
+    return "Select a task first, then I can help with that specific thread.";
   }
 
   if (lower.includes("overwhelmed") || lower.includes("stuck") || lower.includes("first")) {
-    if (suggestion) {
-      return `Start with "${suggestion.step.title}" from "${suggestion.task.title}". Keep it tiny and stop after one visible win.`;
+    if (firstOpenStep) {
+      return `For "${task.title}", start with "${firstOpenStep.title}". Keep it tiny and stop after one visible win.`;
     }
-    return "Pick the lightest task on the board and do the smallest visible part first.";
+    return `For "${task.title}", make one new tiny first step before trying to finish the whole thing.`;
   }
 
   if (lower.includes("break") || lower.includes("gentle")) {
-    return "Try a five-minute sprint, then pause on purpose. A softer restart usually works better than forcing a long push.";
+    return `Make "${task.title}" gentler by choosing one five-minute pass, then pausing on purpose.`;
   }
 
   if (lower.includes("rewrite") || lower.includes("rephrase")) {
-    return "Aim for task names that sound physically startable, like open, draft, send, or check. Specific beats ambitious here.";
+    return "Aim for step names that sound physically startable, like open, draft, send, check, or list. Specific beats ambitious here.";
   }
 
-  return "Keep the next move small, visible, and easy to begin. If you want, ask me what to do first or how to break a task down more gently.";
+  return `Keep "${task.title}" small, visible, and easy to begin. Ask me to plan it when you want a cleaner step list.`;
 }
 
-function pushChatMessage(role, content) {
-  state.ai.chatMessages.push({
-    id: crypto.randomUUID(),
-    role,
-    content,
-    timestamp: new Date().toISOString(),
-  });
+function getAssistantThread(taskId) {
+  const thread = state.assistant.taskThreadsById[taskId];
+  return Array.isArray(thread) ? thread : [];
+}
 
-  state.ai.chatMessages = state.ai.chatMessages.slice(-14);
+function pushChatMessage(taskId, role, content) {
+  const thread = getAssistantThread(taskId);
+  state.assistant.taskThreadsById[taskId] = [
+    ...thread,
+    {
+      id: crypto.randomUUID(),
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+    },
+  ].slice(-14);
+}
+
+function buildSelectedTaskPayload(task) {
+  return {
+    id: task.id,
+    title: task.title,
+    category: task.category,
+    openSteps: task.steps
+      .filter((step) => !step.done)
+      .map((step) => ({
+        id: step.id,
+        title: step.title,
+        effort: step.effort,
+        minutes: step.minutes,
+      })),
+    completedSteps: task.steps
+      .filter((step) => step.done)
+      .map((step) => ({
+        title: step.title,
+        completedAt: step.completedAt,
+      })),
+  };
+}
+
+function buildBoardSummary() {
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task)).length;
+  const completedTasks = state.tasks.filter((task) => isTaskDone(task)).length;
+  const openSteps = state.tasks.reduce((count, task) => count + getOpenSteps(task).length, 0);
+  return `${openTasks} open tasks, ${completedTasks} completed tasks, ${openSteps} unfinished steps, energy ${state.preferences.energy}`;
 }
 
 function buildOpenTaskPayload() {
@@ -2178,64 +1849,14 @@ function buildOpenTaskPayload() {
     }));
 }
 
-function labelAgentMode(mode) {
+function labelAssistantMode(mode) {
   return {
-    idle: "Idle",
-    drafting: "Drafting bundle",
-    awaiting_approval: "Waiting for approval",
-    applying: "Applying actions",
-  }[mode] || "Idle";
-}
-
-function labelAgentActionStatus(status) {
-  return {
-    pending: "Pending",
-    applied: "Applied",
-    rejected: "Rejected",
-    invalid: "Invalid",
-  }[status] || "Pending";
-}
-
-function labelAgentHistoryOutcome(outcome) {
-  return {
-    drafted: "Bundle drafted",
-    fallback_bundle: "Fallback bundle drafted",
-    partial_apply: "Applied one action",
-    apply_all: "Applied bundle",
-    partial_reject: "Rejected one action",
-    invalid_action: "Invalid action encountered",
-    dismissed: "Bundle dismissed",
-  }[outcome] || "Agent updated";
-}
-
-function formatAgentActionType(type) {
-  return {
-    split_task: "Split task",
-    create_task: "Create task",
-    update_task: "Update task",
-    delete_task: "Delete task",
-    reprioritize_tasks: "Reprioritize",
-    set_focus: "Set focus",
-    suggest_sprint: "Suggest sprint",
-    restore_task: "Restore task",
-  }[type] || "Agent action";
-}
-
-function describeAgentAction(action) {
-  if (action.title) {
-    return action.title;
-  }
-
-  if (action.task?.title) {
-    return `${formatAgentActionType(action.type)}: ${action.task.title}`;
-  }
-
-  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
-  if (task) {
-    return `${formatAgentActionType(action.type)}: ${task.title}`;
-  }
-
-  return formatAgentActionType(action.type);
+    idle: "Task selected",
+    chatting: "Chatting",
+    planning: "Planning",
+    previewing: "Preview ready",
+    applying: "Applying plan",
+  }[mode] || "Task selected";
 }
 
 function buildProgressCoachMessage(stepTitle) {
@@ -2418,11 +2039,16 @@ function syncTimerSelections() {
 
 function toggleBusyState() {
   const disabled = state.ai.isLoading;
+  const hasSelectedTask = Boolean(getSelectedAssistantTask());
+  const hasDraft = Boolean(getPlanDraft(state.assistant.selectedTaskId));
   elements.generatePlan.disabled = disabled;
   elements.pickNextStep.disabled = disabled;
-  elements.sendChat.disabled = disabled;
-  elements.runAgent.disabled = disabled;
-  elements.agentGoal.disabled = disabled;
+  elements.sendChat.disabled = disabled || !hasSelectedTask;
+  elements.chatInput.disabled = disabled || !hasSelectedTask;
+  elements.planTask.disabled = disabled || !hasSelectedTask;
+  elements.applySelectedSteps.disabled = disabled || !hasDraft;
+  elements.applyAllSteps.disabled = disabled || !hasDraft;
+  elements.discardPlan.disabled = disabled || !hasDraft;
 }
 
 function setAiLoading(message) {
@@ -2458,14 +2084,13 @@ function saveState() {
     tasks: state.tasks,
     history: state.history,
     draftText: state.draftText,
-    agent: state.agent,
+    assistant: state.assistant,
     preferences: state.preferences,
     focus: state.focus,
     ai: {
       coachMessage: state.ai.coachMessage,
       insight: state.ai.insight,
       guidanceReason: state.ai.guidanceReason,
-      chatMessages: state.ai.chatMessages,
     },
   };
 
@@ -2486,20 +2111,59 @@ function removeDraftEntry(indexToRemove) {
 }
 
 async function fetchJSON(url, body) {
-  const response = await fetch(url, {
+  return requestJSON(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
+}
 
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "Request failed.");
+async function requestJSON(url, options = {}) {
+  if (typeof window.fetch === "function") {
+    const response = await window.fetch(url, options);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Request failed.");
+    }
+
+    return data;
   }
 
-  return data;
+  if (typeof window.XMLHttpRequest !== "function") {
+    throw new Error("Browser does not support API requests.");
+  }
+
+  return requestJSONWithXHR(url, options);
+}
+
+function requestJSONWithXHR(url, options) {
+  return new Promise((resolve, reject) => {
+    const request = new window.XMLHttpRequest();
+    request.open(options.method || "GET", url);
+    Object.entries(options.headers || {}).forEach(([key, value]) => {
+      request.setRequestHeader(key, value);
+    });
+    request.onload = () => {
+      let data = {};
+      try {
+        data = request.responseText ? JSON.parse(request.responseText) : {};
+      } catch (error) {
+        reject(new Error("Response was not valid JSON."));
+        return;
+      }
+
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(data.error || "Request failed."));
+        return;
+      }
+
+      resolve(data);
+    };
+    request.onerror = () => reject(new Error("Request failed."));
+    request.send(options.body || null);
+  });
 }
 
 function formatWhen(timestamp) {

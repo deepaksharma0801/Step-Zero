@@ -1,6 +1,6 @@
 # Step Zero
 
-Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You dump a messy list of tasks, keep a running list of active work, let AI turn that into smaller steps, and then move into a detailed board with next-step guidance and short sprint timers.
+Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You dump a messy list of tasks, keep a running list of active work, let AI turn that into smaller steps, and then use a selected-task assistant to chat about one task or preview a better step plan before applying it.
 
 ## Current flow
 
@@ -9,7 +9,7 @@ Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You d
 3. Remove draft-only items if they were added by mistake
 4. Click `Let's get working`
 5. Step Zero builds a detailed task board with tiny steps
-6. Use AI guidance and short sprints to keep moving
+6. Select a task and use the assistant to chat, re-plan, or start a short sprint
 
 ## What the app does
 
@@ -19,6 +19,8 @@ Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You d
 - Keeps tasks in local storage so they stay after refresh
 - Keeps active tasks in the running list until they are completed
 - Breaks larger tasks into smaller steps with Gemini
+- Provides a per-task assistant thread for the selected task
+- Previews AI-generated replacement steps before applying them
 - Suggests a next step based on current energy
 - Shows a short coach message and a gentle insight
 - Lets you run 5, 10, 15, or 25 minute focus sprints
@@ -30,6 +32,7 @@ Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck. You d
 - Small Node server in [server.js](/Users/snadimi3/Documents/APP%20idea/server.js)
 - Gemini API on the backend
 - Browser `localStorage` for task persistence
+- Per-task assistant threads and plan drafts in `localStorage`
 - Simple in-memory IP rate limiting for public AI routes
 
 ## Local development
@@ -91,12 +94,13 @@ When Gemini is available:
 
 - the brain dump can be turned into structured tasks and steps.
 - the app can suggest one next move from the current board
-- coach copy and insight copy update from the live board state
+- the selected task assistant can chat using task and board context
+- the selected task assistant can preview a replacement open-step plan
 
 When Gemini is unavailable:
 
 - Step Zero falls back to built-in task breakdown logic
-- the app still works, but responses are simpler
+- task planning and chat fall back to simpler built-in support
 
 ## Notes
 
