@@ -14,6 +14,14 @@ const state = {
   ui: {
     editingTaskId: null,
   },
+  agent: {
+    mode: "idle",
+    goal: "",
+    contextSummary: "",
+    inbox: [],
+    runHistory: [],
+    lastAppliedRunId: null,
+  },
   preferences: {
     energy: "low",
   },
@@ -45,6 +53,11 @@ const elements = {
   draftPreview: document.querySelector("#draft-preview"),
   draftCount: document.querySelector("#draft-count"),
   generatePlan: document.querySelector("#generate-plan"),
+  runAgent: document.querySelector("#run-agent"),
+  agentGoal: document.querySelector("#agent-goal"),
+  agentMode: document.querySelector("#agent-mode"),
+  agentInbox: document.querySelector("#agent-inbox"),
+  agentRunHistory: document.querySelector("#agent-run-history"),
   loadDemo: document.querySelector("#load-demo"),
   clearAll: document.querySelector("#clear-all"),
   taskList: document.querySelector("#task-list"),
@@ -104,6 +117,17 @@ function hydrateState() {
       if (typeof parsed.draftText === "string") {
         state.draftText = parsed.draftText;
       }
+      if (parsed.agent) {
+        state.agent = {
+          ...state.agent,
+          mode: parsed.agent.mode || state.agent.mode,
+          goal: parsed.agent.goal || "",
+          contextSummary: parsed.agent.contextSummary || "",
+          inbox: Array.isArray(parsed.agent.inbox) ? parsed.agent.inbox : [],
+          runHistory: Array.isArray(parsed.agent.runHistory) ? parsed.agent.runHistory : [],
+          lastAppliedRunId: parsed.agent.lastAppliedRunId || null,
+        };
+      }
       if (parsed.preferences?.energy) {
         state.preferences.energy = parsed.preferences.energy;
       }
@@ -130,6 +154,7 @@ function hydrateState() {
   }
 
   elements.brainDump.value = state.draftText;
+  elements.agentGoal.value = state.agent.goal;
   updateTimerDisplay();
   syncEnergySelections();
   syncTimerSelections();
@@ -138,6 +163,13 @@ function hydrateState() {
 function bindEvents() {
   elements.generatePlan.addEventListener("click", () => {
     void handleGeneratePlan({ scrollToBoard: true });
+  });
+  elements.runAgent.addEventListener("click", () => {
+    void handleRunAgent();
+  });
+  elements.agentGoal.addEventListener("input", () => {
+    state.agent.goal = elements.agentGoal.value;
+    saveState();
   });
   elements.loadDemo.addEventListener("click", () => {
     setBrainDumpValue(DEMO_TEXT);
@@ -289,6 +321,14 @@ function handleClearAll() {
   state.tasks = [];
   state.history = [];
   state.ui.editingTaskId = null;
+  state.agent = {
+    mode: "idle",
+    goal: "",
+    contextSummary: "",
+    inbox: [],
+    runHistory: [],
+    lastAppliedRunId: null,
+  };
   setBrainDumpValue("");
   state.focus = { taskId: null, stepId: null };
   state.timer.selectedDuration = DEFAULT_DURATION;
@@ -813,6 +853,7 @@ function render() {
   syncTimerSelections();
   renderDraftPreview();
   renderAiPanel();
+  renderAgentPanel();
   renderChatThread();
   renderTasks();
   renderCompletedTasks();
@@ -829,6 +870,163 @@ function renderAiPanel() {
   elements.aiStatusCopy.textContent = state.ai.statusText;
   elements.coachMessage.textContent = state.ai.coachMessage;
   elements.coachInsight.textContent = state.ai.insight;
+}
+
+function renderAgentPanel() {
+  elements.agentGoal.value = state.agent.goal;
+  elements.agentMode.textContent = labelAgentMode(state.agent.mode);
+  renderAgentInbox();
+  renderAgentRunHistory();
+}
+
+function renderAgentInbox() {
+  const inbox = state.agent.inbox;
+
+  if (!inbox.length) {
+    elements.agentInbox.className = "agent-inbox empty-state";
+    elements.agentInbox.innerHTML =
+      "<p>Agent proposal bundles will show up here after you run a goal.</p>";
+    return;
+  }
+
+  elements.agentInbox.className = "agent-inbox";
+  elements.agentInbox.innerHTML = "";
+
+  inbox.forEach((bundle) => {
+    const card = document.createElement("article");
+    card.className = "agent-bundle";
+
+    const header = document.createElement("div");
+    header.className = "agent-bundle-header";
+
+    const copy = document.createElement("div");
+
+    const title = document.createElement("h3");
+    title.className = "agent-bundle-title";
+    title.textContent = bundle.goal || "Agent proposal";
+
+    const meta = document.createElement("p");
+    meta.className = "agent-bundle-meta";
+    meta.textContent = `${formatWhen(bundle.createdAt)}${bundle.contextSummary ? ` • ${bundle.contextSummary}` : ""}`;
+
+    const summary = document.createElement("p");
+    summary.className = "agent-bundle-summary";
+    summary.textContent = bundle.summary;
+
+    copy.append(title, meta, summary);
+
+    const headerActions = document.createElement("div");
+    headerActions.className = "agent-bundle-header-actions";
+
+    const applyAllButton = document.createElement("button");
+    applyAllButton.className = "button button-mini button-primary";
+    applyAllButton.textContent = "Apply all";
+    applyAllButton.disabled = !bundle.actions.some((action) => action.status === "pending");
+    applyAllButton.addEventListener("click", () => applyAllAgentActions(bundle.runId));
+
+    const dismissButton = document.createElement("button");
+    dismissButton.className = "button button-mini button-ghost";
+    dismissButton.textContent = "Dismiss bundle";
+    dismissButton.addEventListener("click", () => dismissAgentBundle(bundle.runId));
+
+    headerActions.append(applyAllButton, dismissButton);
+    header.append(copy, headerActions);
+
+    const coachMessage = document.createElement("p");
+    coachMessage.className = "agent-bundle-coach";
+    coachMessage.textContent = bundle.coachMessage;
+
+    const actionList = document.createElement("div");
+    actionList.className = "agent-action-list";
+
+    bundle.actions.forEach((action) => {
+      const row = document.createElement("div");
+      row.className = `agent-action agent-action-${action.status || "pending"}`;
+
+      const rowCopy = document.createElement("div");
+      rowCopy.className = "agent-action-copy";
+
+      const rowTitle = document.createElement("p");
+      rowTitle.className = "agent-action-title";
+      rowTitle.textContent = action.title || describeAgentAction(action);
+
+      const rowType = document.createElement("p");
+      rowType.className = "agent-action-type";
+      rowType.textContent = `${formatAgentActionType(action.type)} • ${labelAgentActionStatus(action.status || "pending")}`;
+
+      const rowRationale = document.createElement("p");
+      rowRationale.className = "agent-action-rationale";
+      rowRationale.textContent = action.rationale || "No rationale provided.";
+
+      rowCopy.append(rowTitle, rowType, rowRationale);
+
+      if (Array.isArray(action.affectedTaskTitles) && action.affectedTaskTitles.length) {
+        const affected = document.createElement("p");
+        affected.className = "agent-action-affected";
+        affected.textContent = `Touches: ${action.affectedTaskTitles.join(", ")}`;
+        rowCopy.append(affected);
+      }
+
+      if (action.error) {
+        const error = document.createElement("p");
+        error.className = "agent-action-error";
+        error.textContent = action.error;
+        rowCopy.append(error);
+      }
+
+      const rowActions = document.createElement("div");
+      rowActions.className = "agent-action-buttons";
+
+      const applyButton = document.createElement("button");
+      applyButton.className = "button button-mini button-secondary";
+      applyButton.textContent = "Apply";
+      applyButton.disabled = action.status !== "pending";
+      applyButton.addEventListener("click", () => applyAgentAction(bundle.runId, action.id));
+
+      const rejectButton = document.createElement("button");
+      rejectButton.className = "button button-mini button-ghost";
+      rejectButton.textContent = "Reject";
+      rejectButton.disabled = action.status !== "pending";
+      rejectButton.addEventListener("click", () => rejectAgentAction(bundle.runId, action.id));
+
+      rowActions.append(applyButton, rejectButton);
+      row.append(rowCopy, rowActions);
+      actionList.append(row);
+    });
+
+    card.append(header, coachMessage, actionList);
+    elements.agentInbox.append(card);
+  });
+}
+
+function renderAgentRunHistory() {
+  const runs = state.agent.runHistory;
+
+  if (!runs.length) {
+    elements.agentRunHistory.className = "agent-run-history empty-state";
+    elements.agentRunHistory.innerHTML =
+      "<p>Agent runs will be logged here once you start using them.</p>";
+    return;
+  }
+
+  elements.agentRunHistory.className = "agent-run-history";
+  elements.agentRunHistory.innerHTML = "";
+
+  runs.forEach((run) => {
+    const item = document.createElement("div");
+    item.className = "agent-history-item";
+
+    const title = document.createElement("p");
+    title.className = "agent-history-title";
+    title.textContent = run.goal;
+
+    const meta = document.createElement("p");
+    meta.className = "agent-history-meta";
+    meta.textContent = `${formatWhen(run.timestamp)} • ${labelAgentHistoryOutcome(run.outcome)}`;
+
+    item.append(title, meta);
+    elements.agentRunHistory.append(item);
+  });
 }
 
 function renderChatThread() {
@@ -1118,6 +1316,565 @@ function renderCompletedTasks() {
     card.append(top, meta);
     elements.completedList.append(card);
   });
+}
+
+async function handleRunAgent() {
+  if (state.ai.isLoading) {
+    return;
+  }
+
+  const goal = elements.agentGoal.value.trim();
+  if (!goal) {
+    elements.agentGoal.focus();
+    return;
+  }
+
+  state.agent.goal = goal;
+  state.agent.mode = "drafting";
+  state.agent.contextSummary = buildAgentContextSummary();
+  saveState();
+  render();
+
+  if (!canUseAI()) {
+    injectFallbackAgentBundle(goal);
+    return;
+  }
+
+  try {
+    setAiLoading("Agent is reading the board and drafting a proposal bundle...");
+    const data = await fetchJSON("/api/agent/run", {
+      goal,
+      energy: state.preferences.energy,
+      focus: state.focus,
+      openTasks: buildOpenTaskPayload(),
+      completedTasks: buildCompletedTaskSummary(),
+      history: state.history.slice(0, 8),
+      chatMessages: state.ai.chatMessages.slice(-6),
+      contextSummary: state.agent.contextSummary,
+    });
+
+    const bundle = normalizeAgentBundle(data, goal, state.agent.contextSummary);
+    state.agent.inbox.unshift(bundle);
+    state.agent.inbox = state.agent.inbox.slice(0, 8);
+    state.agent.mode = "awaiting_approval";
+    state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
+    state.ai.mode = "live";
+    state.ai.isLoading = false;
+    recordAgentRun(goal, "drafted");
+    saveState();
+    render();
+  } catch (error) {
+    console.error(error);
+    injectFallbackAgentBundle(goal);
+  }
+}
+
+function normalizeAgentBundle(data, goal, contextSummary) {
+  const actions = Array.isArray(data.actions) ? data.actions.map(normalizeAgentAction) : [];
+  return {
+    runId: String(data.runId || crypto.randomUUID()),
+    goal: String(data.goal || goal),
+    summary: String(data.summary || "Step Zero drafted a set of possible board updates."),
+    coachMessage: String(data.coachMessage || "Review the bundle and apply only what feels useful."),
+    contextSummary: String(data.contextSummary || contextSummary || ""),
+    createdAt: new Date().toISOString(),
+    actions,
+  };
+}
+
+function normalizeAgentAction(action) {
+  const normalizedTask = action?.task && typeof action.task === "object"
+    ? normalizeAgentTaskPayload(action.task)
+    : null;
+  const normalizedSteps = Array.isArray(action?.steps)
+    ? action.steps
+      .map((step) => normalizeAgentStepPayload(step))
+      .filter(Boolean)
+    : [];
+
+  return {
+    id: String(action?.id || crypto.randomUUID()),
+    type: String(action?.type || "update_task"),
+    title: String(action?.title || "").trim() || null,
+    rationale: String(action?.rationale || "").trim() || null,
+    targetTaskId: action?.targetTaskId ? String(action.targetTaskId) : null,
+    targetStepId: action?.targetStepId ? String(action.targetStepId) : null,
+    targetCompletedTaskId: action?.targetCompletedTaskId ? String(action.targetCompletedTaskId) : null,
+    task: normalizedTask,
+    steps: normalizedSteps,
+    splitMode: action?.splitMode === "append" ? "append" : "replace",
+    order: Array.isArray(action?.order) ? action.order.map((id) => String(id)) : [],
+    duration: normalizeMinutes(action?.duration || action?.minutes || 10),
+    affectedTaskTitles: Array.isArray(action?.affectedTaskTitles)
+      ? action.affectedTaskTitles.map((value) => tidySentence(value)).filter(Boolean)
+      : deriveAffectedTaskTitles(action, normalizedTask),
+    status: "pending",
+    error: "",
+  };
+}
+
+function normalizeAgentTaskPayload(task) {
+  const title = tidySentence(task?.title || "");
+  if (!title) {
+    return null;
+  }
+
+  const steps = Array.isArray(task?.steps)
+    ? task.steps.map((step) => normalizeAgentStepPayload(step)).filter(Boolean)
+    : [];
+
+  return {
+    title,
+    category: tidySentence(task?.category || "General"),
+    steps,
+  };
+}
+
+function normalizeAgentStepPayload(step) {
+  const title = tidySentence(step?.title || "");
+  if (!title) {
+    return null;
+  }
+
+  return {
+    title,
+    effort: normalizeEffort(step?.effort),
+    minutes: normalizeMinutes(step?.minutes),
+  };
+}
+
+function deriveAffectedTaskTitles(action, normalizedTask) {
+  const titles = [];
+  if (normalizedTask?.title) {
+    titles.push(normalizedTask.title);
+  }
+  const targetTask = state.tasks.find((task) => task.id === action?.targetTaskId);
+  if (targetTask?.title) {
+    titles.push(targetTask.title);
+  }
+  const completedTask = state.tasks.find((task) => task.id === action?.targetCompletedTaskId);
+  if (completedTask?.title) {
+    titles.push(completedTask.title);
+  }
+  return [...new Set(titles)];
+}
+
+function injectFallbackAgentBundle(goal) {
+  const fallbackActions = buildFallbackAgentActions(goal);
+  const bundle = {
+    runId: crypto.randomUUID(),
+    goal,
+    summary: "Step Zero drafted a fallback action bundle using the current board.",
+    coachMessage: "AI was unavailable, so this bundle uses built-in logic. You can still apply only the parts you want.",
+    contextSummary: buildAgentContextSummary(),
+    createdAt: new Date().toISOString(),
+    actions: fallbackActions.map(normalizeAgentAction),
+  };
+
+  state.agent.inbox.unshift(bundle);
+  state.agent.inbox = state.agent.inbox.slice(0, 8);
+  state.agent.mode = "awaiting_approval";
+  state.ai.isLoading = false;
+  state.ai.mode = "fallback";
+  state.ai.statusText = "Agent AI was unavailable, so Step Zero drafted a built-in proposal bundle instead.";
+  recordAgentRun(goal, "fallback_bundle");
+  saveState();
+  render();
+}
+
+function buildFallbackAgentActions(goal) {
+  const actions = [];
+  const suggestion = getSuggestedStep();
+  const firstOpenTask = state.tasks.find((task) => !isTaskDone(task));
+
+  if (!state.tasks.length && state.draftText.trim()) {
+    const draftTasks = splitEntries(state.draftText).slice(0, 3).map((entry) => createTaskFromEntry(entry));
+    draftTasks.forEach((task) => {
+      actions.push({
+        type: "create_task",
+        title: `Create "${task.title}"`,
+        rationale: "You already named this in the draft area, so the fastest move is to bring it into the board.",
+        task: {
+          title: task.title,
+          category: task.category,
+          steps: task.steps.map((step) => ({
+            title: step.title,
+            effort: step.effort,
+            minutes: step.minutes,
+          })),
+        },
+      });
+    });
+  }
+
+  if (firstOpenTask) {
+    actions.push({
+      type: "set_focus",
+      title: `Focus ${firstOpenTask.title}`,
+      rationale: "A clear target reduces friction before you start a sprint.",
+      targetTaskId: firstOpenTask.id,
+      targetStepId: getOpenSteps(firstOpenTask)[0]?.id || null,
+      affectedTaskTitles: [firstOpenTask.title],
+    });
+
+    actions.push({
+      type: "suggest_sprint",
+      title: "Set a 10-minute sprint",
+      rationale: "A short sprint is usually enough to create motion without overwhelming the board.",
+      targetTaskId: firstOpenTask.id,
+      targetStepId: getOpenSteps(firstOpenTask)[0]?.id || null,
+      duration: 10,
+      affectedTaskTitles: [firstOpenTask.title],
+    });
+  }
+
+  if (suggestion) {
+    actions.push({
+      type: "update_task",
+      title: `Tighten ${suggestion.task.title}`,
+      rationale: `Goal noted: "${goal}". This task can be made easier to start by making its top step more concrete.`,
+      targetTaskId: suggestion.task.id,
+      steps: [
+        {
+          title: `Open what you need for ${suggestion.task.title.toLowerCase()}.`,
+          effort: "low",
+          minutes: 2,
+        },
+        ...suggestion.task.steps
+          .filter((step) => !step.done)
+          .slice(1, 4)
+          .map((step) => ({
+            title: step.title,
+            effort: step.effort,
+            minutes: step.minutes,
+          })),
+      ],
+      affectedTaskTitles: [suggestion.task.title],
+    });
+  }
+
+  if (!actions.length) {
+    actions.push({
+      type: "create_task",
+      title: "Create a starter task",
+      rationale: `The board is almost empty, so the cleanest first move for "${goal}" is to create one concrete starting task.`,
+      task: {
+        title: tidySentence(goal) || "Starter task",
+        category: "General",
+        steps: [
+          { title: "Open what you need to begin.", effort: "low", minutes: 2 },
+          { title: "Define the smallest visible first move.", effort: "low", minutes: 4 },
+          { title: "Do one focused pass.", effort: "medium", minutes: 10 },
+        ],
+      },
+    });
+  }
+
+  return actions.slice(0, 4);
+}
+
+function applyAgentAction(runId, actionId) {
+  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
+  const action = bundle?.actions.find((entry) => entry.id === actionId);
+  if (!bundle || !action || action.status !== "pending") {
+    return;
+  }
+
+  state.agent.mode = "applying";
+  const result = executeAgentAction(action);
+
+  if (result.ok) {
+    action.status = "applied";
+    action.error = "";
+    state.agent.lastAppliedRunId = runId;
+    recordHistory("reset", `Agent applied: ${action.title || describeAgentAction(action)}.`);
+    recordAgentRun(bundle.goal, "partial_apply");
+  } else {
+    action.status = "invalid";
+    action.error = result.error;
+    recordAgentRun(bundle.goal, "invalid_action");
+  }
+
+  finalizeAgentBundleState(bundle);
+  ensureFocusedStep();
+  saveState();
+  render();
+}
+
+function applyAllAgentActions(runId) {
+  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
+  if (!bundle) {
+    return;
+  }
+
+  state.agent.mode = "applying";
+  bundle.actions
+    .filter((action) => action.status === "pending")
+    .forEach((action) => {
+      const result = executeAgentAction(action);
+      if (result.ok) {
+        action.status = "applied";
+        action.error = "";
+      } else {
+        action.status = "invalid";
+        action.error = result.error;
+      }
+    });
+
+  state.agent.lastAppliedRunId = runId;
+  finalizeAgentBundleState(bundle);
+  const appliedCount = bundle.actions.filter((action) => action.status === "applied").length;
+  recordHistory("reset", `Agent applied ${appliedCount} action${appliedCount === 1 ? "" : "s"} from one bundle.`);
+  recordAgentRun(bundle.goal, appliedCount ? "apply_all" : "invalid_action");
+  ensureFocusedStep();
+  saveState();
+  render();
+}
+
+function rejectAgentAction(runId, actionId) {
+  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
+  const action = bundle?.actions.find((entry) => entry.id === actionId);
+  if (!bundle || !action || action.status !== "pending") {
+    return;
+  }
+
+  action.status = "rejected";
+  action.error = "";
+  finalizeAgentBundleState(bundle);
+  recordAgentRun(bundle.goal, "partial_reject");
+  saveState();
+  render();
+}
+
+function dismissAgentBundle(runId) {
+  const bundle = state.agent.inbox.find((entry) => entry.runId === runId);
+  state.agent.inbox = state.agent.inbox.filter((entry) => entry.runId !== runId);
+  if (bundle) {
+    recordAgentRun(bundle.goal, "dismissed");
+  }
+  state.agent.mode = state.agent.inbox.length ? "awaiting_approval" : "idle";
+  saveState();
+  render();
+}
+
+function finalizeAgentBundleState(bundle) {
+  const hasPending = bundle.actions.some((action) => action.status === "pending");
+  state.agent.mode = hasPending ? "awaiting_approval" : "idle";
+}
+
+function executeAgentAction(action) {
+  switch (action.type) {
+    case "create_task":
+      return executeCreateTaskAction(action);
+    case "update_task":
+      return executeUpdateTaskAction(action);
+    case "split_task":
+      return executeSplitTaskAction(action);
+    case "delete_task":
+      return executeDeleteTaskAction(action);
+    case "reprioritize_tasks":
+      return executeReprioritizeAction(action);
+    case "set_focus":
+      return executeSetFocusAction(action);
+    case "suggest_sprint":
+      return executeSuggestSprintAction(action);
+    case "restore_task":
+      return executeRestoreTaskAction(action);
+    default:
+      return { ok: false, error: `Unknown action type: ${action.type}` };
+  }
+}
+
+function executeCreateTaskAction(action) {
+  if (!action.task?.title) {
+    return { ok: false, error: "Missing task payload for create action." };
+  }
+
+  const exists = state.tasks.some(
+    (task) => task.title.toLowerCase() === action.task.title.toLowerCase()
+  );
+  if (exists) {
+    return { ok: false, error: "A task with this title already exists on the board." };
+  }
+
+  const task = createTaskFromAiTask(action.task);
+  state.tasks.push(task);
+  return { ok: true };
+}
+
+function executeUpdateTaskAction(action) {
+  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
+  if (!task) {
+    return { ok: false, error: "That task no longer exists on the board." };
+  }
+
+  const hasTaskUpdate = Boolean(action.task?.title || action.task?.category);
+  const nextStepsSource = action.steps.length ? action.steps : action.task?.steps || [];
+  if (!hasTaskUpdate && !nextStepsSource.length) {
+    return { ok: false, error: "This update action did not include any editable task changes." };
+  }
+
+  if (action.task?.title) {
+    task.title = action.task.title;
+  }
+  if (action.task?.category) {
+    task.category = action.task.category;
+  }
+
+  if (nextStepsSource.length) {
+    const existingOpenSteps = task.steps.filter((step) => step.done);
+    const rebuiltOpenSteps = nextStepsSource.slice(0, 4).map((step) => ({
+      id: crypto.randomUUID(),
+      title: tidySentence(step.title),
+      effort: normalizeEffort(step.effort),
+      minutes: normalizeMinutes(step.minutes),
+      done: false,
+      completedAt: null,
+    }));
+    task.steps = [...existingOpenSteps, ...rebuiltOpenSteps];
+  }
+
+  return { ok: true };
+}
+
+function executeSplitTaskAction(action) {
+  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
+  if (!task) {
+    return { ok: false, error: "That task no longer exists on the board." };
+  }
+
+  if (!action.steps.length) {
+    return { ok: false, error: "No replacement steps were provided for this split action." };
+  }
+
+  const completedSteps = task.steps.filter((step) => step.done);
+  const newOpenSteps = action.steps.slice(0, 4).map((step) => ({
+    id: crypto.randomUUID(),
+    title: tidySentence(step.title),
+    effort: normalizeEffort(step.effort),
+    minutes: normalizeMinutes(step.minutes),
+    done: false,
+    completedAt: null,
+  }));
+
+  if (action.splitMode === "append") {
+    const currentOpenSteps = task.steps.filter((step) => !step.done);
+    task.steps = [...completedSteps, ...currentOpenSteps, ...newOpenSteps].slice(0, completedSteps.length + 4);
+  } else {
+    task.steps = [...completedSteps, ...newOpenSteps];
+  }
+
+  return { ok: true };
+}
+
+function executeDeleteTaskAction(action) {
+  const taskIndex = state.tasks.findIndex((entry) => entry.id === action.targetTaskId);
+  if (taskIndex === -1) {
+    return { ok: false, error: "That task was already removed." };
+  }
+
+  const [removedTask] = state.tasks.splice(taskIndex, 1);
+  if (state.focus.taskId === removedTask.id) {
+    state.focus.taskId = null;
+    state.focus.stepId = null;
+  }
+  return { ok: true };
+}
+
+function executeReprioritizeAction(action) {
+  if (!action.order.length) {
+    return { ok: false, error: "No task order was provided for reprioritization." };
+  }
+
+  const orderIndex = new Map(action.order.map((id, index) => [id, index]));
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task));
+  const completedTasks = state.tasks.filter((task) => isTaskDone(task));
+  const missing = action.order.some((id) => !openTasks.find((task) => task.id === id));
+
+  if (missing) {
+    return { ok: false, error: "One or more tasks in the proposed order no longer exist." };
+  }
+
+  const reorderedOpen = [...openTasks].sort((a, b) => {
+    const aIndex = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
+    const bIndex = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
+    return aIndex - bIndex;
+  });
+
+  state.tasks = [...reorderedOpen, ...completedTasks];
+  return { ok: true };
+}
+
+function executeSetFocusAction(action) {
+  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
+  if (!task) {
+    return { ok: false, error: "The proposed focus task is no longer on the board." };
+  }
+
+  const step = action.targetStepId
+    ? task.steps.find((entry) => entry.id === action.targetStepId && !entry.done)
+    : getOpenSteps(task)[0];
+  if (!step) {
+    return { ok: false, error: "The proposed focus step is no longer available." };
+  }
+
+  state.focus.taskId = task.id;
+  state.focus.stepId = step.id;
+  return { ok: true };
+}
+
+function executeSuggestSprintAction(action) {
+  const focusResult = executeSetFocusAction(action);
+  if (!focusResult.ok) {
+    return focusResult;
+  }
+
+  state.timer.selectedDuration = normalizeMinutes(action.duration);
+  state.timer.remainingSeconds = state.timer.selectedDuration * 60;
+  return { ok: true };
+}
+
+function executeRestoreTaskAction(action) {
+  const task = state.tasks.find((entry) => entry.id === (action.targetCompletedTaskId || action.targetTaskId));
+  if (!task) {
+    return { ok: false, error: "The completed task is no longer available to restore." };
+  }
+
+  task.steps.forEach((step) => {
+    step.done = false;
+    step.completedAt = null;
+  });
+
+  return { ok: true };
+}
+
+function buildAgentContextSummary() {
+  const openTasks = state.tasks.filter((task) => !isTaskDone(task)).length;
+  const completedTasks = state.tasks.filter((task) => isTaskDone(task)).length;
+  const openSteps = state.tasks.reduce((count, task) => count + getOpenSteps(task).length, 0);
+  return `${openTasks} open tasks, ${completedTasks} completed tasks, ${openSteps} unfinished steps, energy ${state.preferences.energy}`;
+}
+
+function buildCompletedTaskSummary() {
+  return state.tasks
+    .filter((task) => isTaskDone(task))
+    .slice(-6)
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      completedAt: formatCompletedTaskTime(task),
+    }));
+}
+
+function recordAgentRun(goal, outcome) {
+  state.agent.runHistory.unshift({
+    id: crypto.randomUUID(),
+    goal,
+    outcome,
+    timestamp: new Date().toISOString(),
+  });
+  state.agent.runHistory = state.agent.runHistory.slice(0, 12);
 }
 
 async function handleChatSubmit() {
@@ -1421,6 +2178,66 @@ function buildOpenTaskPayload() {
     }));
 }
 
+function labelAgentMode(mode) {
+  return {
+    idle: "Idle",
+    drafting: "Drafting bundle",
+    awaiting_approval: "Waiting for approval",
+    applying: "Applying actions",
+  }[mode] || "Idle";
+}
+
+function labelAgentActionStatus(status) {
+  return {
+    pending: "Pending",
+    applied: "Applied",
+    rejected: "Rejected",
+    invalid: "Invalid",
+  }[status] || "Pending";
+}
+
+function labelAgentHistoryOutcome(outcome) {
+  return {
+    drafted: "Bundle drafted",
+    fallback_bundle: "Fallback bundle drafted",
+    partial_apply: "Applied one action",
+    apply_all: "Applied bundle",
+    partial_reject: "Rejected one action",
+    invalid_action: "Invalid action encountered",
+    dismissed: "Bundle dismissed",
+  }[outcome] || "Agent updated";
+}
+
+function formatAgentActionType(type) {
+  return {
+    split_task: "Split task",
+    create_task: "Create task",
+    update_task: "Update task",
+    delete_task: "Delete task",
+    reprioritize_tasks: "Reprioritize",
+    set_focus: "Set focus",
+    suggest_sprint: "Suggest sprint",
+    restore_task: "Restore task",
+  }[type] || "Agent action";
+}
+
+function describeAgentAction(action) {
+  if (action.title) {
+    return action.title;
+  }
+
+  if (action.task?.title) {
+    return `${formatAgentActionType(action.type)}: ${action.task.title}`;
+  }
+
+  const task = state.tasks.find((entry) => entry.id === action.targetTaskId);
+  if (task) {
+    return `${formatAgentActionType(action.type)}: ${task.title}`;
+  }
+
+  return formatAgentActionType(action.type);
+}
+
 function buildProgressCoachMessage(stepTitle) {
   return `Nice. "${stepTitle}" is done, which means your next restart will be easier than the last one.`;
 }
@@ -1604,6 +2421,8 @@ function toggleBusyState() {
   elements.generatePlan.disabled = disabled;
   elements.pickNextStep.disabled = disabled;
   elements.sendChat.disabled = disabled;
+  elements.runAgent.disabled = disabled;
+  elements.agentGoal.disabled = disabled;
 }
 
 function setAiLoading(message) {
@@ -1639,6 +2458,7 @@ function saveState() {
     tasks: state.tasks,
     history: state.history,
     draftText: state.draftText,
+    agent: state.agent,
     preferences: state.preferences,
     focus: state.focus,
     ai: {

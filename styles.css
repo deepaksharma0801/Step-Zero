@@ -560,12 +560,134 @@ textarea:focus {
   gap: 0.2rem;
 }
 
+.agent-goal-block,
+.agent-inbox-block,
+.agent-history-block,
 .ai-chat {
   display: grid;
   gap: 0.85rem;
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.agent-goal-input {
+  min-height: 92px;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(63, 119, 182, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  resize: vertical;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.agent-goal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-section-heading {
+  margin-bottom: 0;
+}
+
+.agent-inbox,
+.agent-run-history {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.agent-bundle {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1rem;
+  border: 1px solid rgba(63, 119, 182, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.agent-bundle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 0.9rem;
+}
+
+.agent-bundle-header-actions,
+.agent-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.agent-bundle-title,
+.agent-action-title,
+.agent-history-title {
+  margin: 0;
+}
+
+.agent-bundle-meta,
+.agent-bundle-summary,
+.agent-bundle-coach,
+.agent-action-type,
+.agent-action-rationale,
+.agent-action-affected,
+.agent-history-meta {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+}
+
+.agent-bundle-coach {
+  margin-top: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  background: rgba(221, 234, 251, 0.5);
+  color: var(--blue-deep);
+}
+
+.agent-action-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.agent-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: start;
+  padding: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(63, 119, 182, 0.1);
+  background: rgba(248, 251, 255, 0.88);
+}
+
+.agent-action-applied {
+  background: rgba(232, 245, 235, 0.9);
+}
+
+.agent-action-rejected {
+  background: rgba(249, 250, 252, 0.9);
+  opacity: 0.78;
+}
+
+.agent-action-invalid {
+  background: rgba(255, 244, 241, 0.92);
+}
+
+.agent-action-error {
+  margin: 0.45rem 0 0;
+  color: #a34f38;
+}
+
+.agent-history-item {
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.agent-history-item:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .ai-chat-header {
@@ -923,6 +1045,11 @@ textarea:focus {
   .brain-dump-bar {
     align-items: start;
     flex-direction: column;
+  }
+
+  .agent-bundle-header,
+  .agent-action {
+    grid-template-columns: 1fr;
   }
 
   .task-card-top {

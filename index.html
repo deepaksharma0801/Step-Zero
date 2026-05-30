@@ -87,10 +87,10 @@ call doctor"
           <section class="panel panel-next-step hero-guide-panel">
             <div class="section-heading section-heading-row">
               <div>
-                <p class="section-kicker">AI Guide</p>
-                <h2>Get a suggested next step, coaching, and a helpful insight.</h2>
+                <p class="section-kicker">Agent Workspace</p>
+                <h2>Give Step Zero a goal and review the actions it proposes.</h2>
               </div>
-              <p class="section-note">AI when connected. Calm fallback when not.</p>
+              <p class="section-note">Human-in-the-loop agent inside your board.</p>
             </div>
             <div class="ai-setup hero-ai-setup">
               <div class="ai-setup-copy">
@@ -104,6 +104,53 @@ call doctor"
               <button class="energy-option is-active" data-energy="low">Low energy</button>
               <button class="energy-option" data-energy="medium">Steady</button>
               <button class="energy-option" data-energy="high">Locked in</button>
+            </div>
+            <div class="agent-goal-block">
+              <div class="agent-goal-copy">
+                <p class="ai-copy-label">Agent goal</p>
+                <p class="ai-setup-note">Tell the agent what kind of help you want from the current board.</p>
+              </div>
+              <label class="sr-only" for="agent-goal">Agent goal</label>
+              <textarea
+                id="agent-goal"
+                class="agent-goal-input"
+                rows="3"
+                placeholder="Help me recover from overwhelm and get through the next 30 minutes."
+              ></textarea>
+              <div class="agent-goal-actions">
+                <button id="run-agent" class="button button-primary">Run agent</button>
+              </div>
+            </div>
+            <div class="agent-inbox-block">
+              <div class="section-heading section-heading-row agent-section-heading">
+                <div>
+                  <p class="ai-copy-label">Agent inbox</p>
+                  <h3>Review proposed actions before anything changes.</h3>
+                </div>
+                <p id="agent-mode" class="section-note">Idle</p>
+              </div>
+              <div id="agent-inbox" class="agent-inbox empty-state">
+                <p>Agent proposal bundles will show up here after you run a goal.</p>
+              </div>
+            </div>
+            <div class="agent-history-block">
+              <div class="section-heading section-heading-row agent-section-heading">
+                <div>
+                  <p class="ai-copy-label">Agent run history</p>
+                  <h3>What the agent tried and what you accepted.</h3>
+                </div>
+              </div>
+              <div id="agent-run-history" class="agent-run-history empty-state">
+                <p>Agent runs will be logged here once you start using them.</p>
+              </div>
+            </div>
+            <div class="agent-secondary">
+              <div class="section-heading section-heading-row agent-section-heading">
+                <div>
+                  <p class="ai-copy-label">Guidance companion</p>
+                  <h3>Use focused suggestions and chat when you want lighter support.</h3>
+                </div>
+              </div>
             </div>
             <div id="suggestion-card" class="suggestion-card empty">
               <p class="suggestion-empty">Add a few tasks and Step Zero will pick a tiny next move.</p>

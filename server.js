@@ -64,6 +64,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/agent/run") {
+      if (!enforceRateLimit(req, res)) {
+        return;
+      }
+      await handleAgentRun(req, res);
+      return;
+    }
+
     if (req.method === "GET") {
       serveStatic(url.pathname, res);
       return;
@@ -280,6 +288,168 @@ async function handleChat(req, res) {
 
   const data = await requestAIJson({
     schemaName: "step_zero_chat",
+    schema,
+    userPrompt: prompt,
+  });
+
+  sendJson(res, 200, data);
+}
+
+async function handleAgentRun(req, res) {
+  if (!GEMINI_API_KEY) {
+    sendJson(res, 503, { error: "AI is not configured on the server." });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  const goal = String(body.goal || "").trim();
+  const energy = normalizeEnergy(body.energy);
+  const openTasks = Array.isArray(body.openTasks) ? body.openTasks : [];
+  const completedTasks = Array.isArray(body.completedTasks) ? body.completedTasks : [];
+  const history = Array.isArray(body.history) ? body.history : [];
+  const chatMessages = Array.isArray(body.chatMessages) ? body.chatMessages : [];
+  const focus = body.focus || {};
+  const contextSummary = String(body.contextSummary || "");
+
+  if (!goal) {
+    sendJson(res, 400, { error: "Missing agent goal." });
+    return;
+  }
+
+  const conversation = chatMessages
+    .slice(-6)
+    .map((message) => `${message.role === "user" ? "User" : "Coach"}: ${String(message.content || "")}`)
+    .join("\n");
+
+  const prompt = [
+    "You are Step Zero's action agent inside a productivity app.",
+    "Your job is to propose a small batched bundle of board actions, not to take actions yourself.",
+    "Only use the allowed action types.",
+    "Prefer 2 to 4 actions per bundle.",
+    "Every action should be concrete, helpful, and safe to apply in the app.",
+    "Use update_task only for rewriting a task title, category, or open step wording.",
+    "Do not use update_task to mark steps complete or to simulate progress that the user has not approved.",
+    "Do not reference tools outside the app.",
+    "Do not suggest actions that require email, calendar, browser, or external systems.",
+    "When task ids or step ids are needed, reuse the exact ids from the provided board context.",
+    "If the board is nearly empty, create or shape tasks from what is already available.",
+    "Keep the summary and coachMessage concise and supportive.",
+    "",
+    `Goal: ${goal}`,
+    `Energy level: ${energy}`,
+    `Currently focused taskId: ${focus.taskId || "none"}`,
+    `Currently focused stepId: ${focus.stepId || "none"}`,
+    `Board summary: ${contextSummary || "No summary provided."}`,
+    "Open tasks:",
+    JSON.stringify(openTasks),
+    "Completed tasks:",
+    JSON.stringify(completedTasks),
+    "Recent board history:",
+    JSON.stringify(history.slice(0, 8).map((item) => ({
+      type: item.type,
+      summary: item.summary,
+      timestamp: item.timestamp,
+    }))),
+    "Recent coach chat:",
+    conversation || "No recent chat.",
+    "",
+    "Allowed action types:",
+    "split_task, create_task, update_task, delete_task, reprioritize_tasks, set_focus, suggest_sprint, restore_task",
+  ].join("\n");
+
+  const actionSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      id: { type: "string" },
+      type: {
+        type: "string",
+        enum: [
+          "split_task",
+          "create_task",
+          "update_task",
+          "delete_task",
+          "reprioritize_tasks",
+          "set_focus",
+          "suggest_sprint",
+          "restore_task",
+        ],
+      },
+      title: { type: "string" },
+      rationale: { type: "string" },
+      targetTaskId: { type: "string" },
+      targetStepId: { type: "string" },
+      targetCompletedTaskId: { type: "string" },
+      splitMode: { type: "string", enum: ["replace", "append"] },
+      duration: { type: "integer", minimum: 1, maximum: 30 },
+      order: {
+        type: "array",
+        items: { type: "string" },
+      },
+      affectedTaskTitles: {
+        type: "array",
+        items: { type: "string" },
+      },
+      task: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          category: { type: "string" },
+          steps: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                effort: { type: "string", enum: ["low", "medium", "high"] },
+                minutes: { type: "integer", minimum: 1, maximum: 30 },
+              },
+              required: ["title", "effort", "minutes"],
+            },
+          },
+        },
+        required: ["title", "category", "steps"],
+      },
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            effort: { type: "string", enum: ["low", "medium", "high"] },
+            minutes: { type: "integer", minimum: 1, maximum: 30 },
+          },
+          required: ["title", "effort", "minutes"],
+        },
+      },
+    },
+    required: ["id", "type", "title", "rationale"],
+  };
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      runId: { type: "string" },
+      goal: { type: "string" },
+      summary: { type: "string" },
+      coachMessage: { type: "string" },
+      contextSummary: { type: "string" },
+      actions: {
+        type: "array",
+        minItems: 1,
+        maxItems: 5,
+        items: actionSchema,
+      },
+    },
+    required: ["runId", "goal", "summary", "coachMessage", "actions"],
+  };
+
+  const data = await requestAIJson({
+    schemaName: "step_zero_agent_run",
     schema,
     userPrompt: prompt,
   });
