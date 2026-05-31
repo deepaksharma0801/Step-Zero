@@ -67,82 +67,25 @@ call doctor"
           </div>
         </div>
         <div class="hero-side">
-          <div class="hero-card">
-            <p class="hero-card-label">Today&apos;s momentum</p>
-            <div class="hero-stats">
-              <div class="stat-tile">
-                <span class="stat-caption">Completed</span>
-                <span id="today-steps" class="hero-stat-value">0</span>
-                <span class="hero-stat-label">steps finished</span>
-              </div>
-              <div class="stat-tile">
-                <span class="stat-caption">Focused</span>
-                <span id="today-sprints" class="hero-stat-value">0</span>
-                <span class="hero-stat-label">sprints completed</span>
-              </div>
-            </div>
-            <p id="momentum-note" class="hero-note">Any progress is progress.</p>
-          </div>
-
           <section class="panel panel-next-step hero-guide-panel">
             <div class="section-heading section-heading-row">
               <div>
-                <p class="section-kicker">Selected Task Assistant</p>
-                <h2>Pick a task and work it through with Step Zero.</h2>
+                <p class="section-kicker">Task Assistant</p>
+                <h2>Pick one task. Talk it through. Re-plan only when needed.</h2>
               </div>
               <p id="assistant-mode" class="section-note">No task selected</p>
             </div>
-            <div class="ai-setup hero-ai-setup">
-              <div class="ai-setup-copy">
-                <p class="ai-setup-title">AI status</p>
-                <p id="ai-status-copy" class="ai-setup-note">
-                  Step Zero is checking whether the AI guide is ready.
-                </p>
-              </div>
-            </div>
-            <div class="energy-picker" role="group" aria-label="Energy level">
-              <button class="energy-option is-active" data-energy="low">Low energy</button>
-              <button class="energy-option" data-energy="medium">Steady</button>
-              <button class="energy-option" data-energy="high">Locked in</button>
-            </div>
             <div id="assistant-empty" class="assistant-empty empty-state">
-              <p>Select a task from the board to open its assistant thread and planning tools.</p>
+              <p>Select a task from the board to open its chat and planning tools.</p>
             </div>
             <div id="assistant-workspace" class="assistant-workspace hidden">
               <div id="assistant-task-card" class="assistant-task-card"></div>
               <div class="assistant-section">
-                <div class="section-heading section-heading-row assistant-section-heading">
-                  <div>
-                    <p class="ai-copy-label">Current open steps</p>
-                    <h3>The plan Step Zero can help reshape.</h3>
-                  </div>
-                </div>
-                <div id="assistant-step-list" class="assistant-step-list"></div>
-              </div>
-              <div class="assistant-section">
-                <div class="section-heading section-heading-row assistant-section-heading">
-                  <div>
-                    <p class="ai-copy-label">Plan preview</p>
-                    <h3>Generated steps wait here until you apply them.</h3>
-                  </div>
-                </div>
-                <div id="plan-preview" class="plan-preview empty-state">
-                  <p>No draft yet. Plan this task when you want a clearer path.</p>
-                </div>
-                <div class="plan-actions">
-                  <button id="plan-task" class="button button-primary">Plan this task</button>
-                  <button id="apply-selected-steps" class="button button-secondary">Apply selected</button>
-                  <button id="apply-all-steps" class="button button-secondary">Apply all</button>
-                  <button id="discard-plan" class="button button-ghost">Discard draft</button>
-                </div>
-              </div>
-              <div class="assistant-section">
                 <div class="ai-chat-header">
-                  <p class="ai-copy-label">Task chat</p>
-                  <p class="section-note ai-chat-note">Ask about this selected task.</p>
+                  <p class="ai-copy-label">Chat</p>
                 </div>
                 <div id="chat-thread" class="chat-thread empty-state">
-                  <p>This task's chat will show up here once you ask something.</p>
+                  <p>This task&apos;s chat will show up here once you ask something.</p>
                 </div>
                 <form id="chat-form" class="chat-form">
                   <label class="sr-only" for="chat-input">Ask the selected-task assistant a question</label>
@@ -153,26 +96,28 @@ call doctor"
                     placeholder="Break this down more gently."
                   ></textarea>
                   <div class="chat-actions">
-                    <button id="send-chat" type="submit" class="button button-primary">Ask assistant</button>
+                    <button id="send-chat" type="submit" class="button button-primary">Ask</button>
                   </div>
                 </form>
               </div>
-            </div>
-            <div class="ai-response">
-              <div class="ai-copy-block">
-                <p class="ai-copy-label">Coach</p>
-                <p id="coach-message" class="ai-copy-text">
-                  The AI coach will guide your next move here when it is ready.
-                </p>
+              <div class="assistant-section">
+                <div class="section-heading section-heading-row assistant-section-heading">
+                  <div>
+                    <p class="ai-copy-label">Plan</p>
+                    <h3>Preview new steps before changing the board.</h3>
+                  </div>
+                </div>
+                <div id="plan-preview" class="plan-preview empty-state">
+                  <p>No draft yet.</p>
+                </div>
+                <div class="plan-actions">
+                  <button id="plan-task" class="button button-primary">Plan this task</button>
+                  <button id="apply-selected-steps" class="button button-secondary">Apply selected</button>
+                  <button id="apply-all-steps" class="button button-secondary">Apply all</button>
+                  <button id="discard-plan" class="button button-ghost">Discard draft</button>
+                </div>
               </div>
-              <div class="ai-copy-block">
-                <p class="ai-copy-label">Insight</p>
-                <p id="coach-insight" class="ai-copy-text">
-                  Your patterns and gentle nudges will show up here.
-                </p>
-              </div>
             </div>
-            <button id="pick-next-step" class="button button-primary button-full">Refresh guidance</button>
           </section>
         </div>
       </header>
@@ -204,33 +149,9 @@ call doctor"
             </div>
           </section>
 
-          <section class="panel panel-history">
-            <div class="section-heading section-heading-row">
-              <div>
-                <p class="section-kicker">History</p>
-                <h2>Proof that you do come back.</h2>
-              </div>
-              <p class="section-note">Momentum over streaks.</p>
-            </div>
-            <div class="history-grid">
-              <div class="history-card">
-                <span class="stat-caption">Resets</span>
-                <span class="history-number" id="return-count">0</span>
-                <span class="history-label">times you restarted</span>
-              </div>
-              <div class="history-card">
-                <span class="stat-caption">Open</span>
-                <span class="history-number" id="open-loops">0</span>
-                <span class="history-label">unfinished tiny steps</span>
-              </div>
-            </div>
-            <div id="history-log" class="history-log empty-state">
-              <p>Your completed steps and sprints will show up here.</p>
-            </div>
-          </section>
         </div>
 
-        <div class="main-column main-column-secondary">
+        <div class="main-column main-column-secondary hidden">
           <section class="panel panel-timer">
             <div class="section-heading section-heading-row">
               <div>

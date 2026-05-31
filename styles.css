@@ -182,7 +182,7 @@ h3 {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(420px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 2.2rem;
   padding-top: 1.55rem;
 }

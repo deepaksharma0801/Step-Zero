@@ -55,7 +55,6 @@ const elements = {
   assistantEmpty: document.querySelector("#assistant-empty"),
   assistantWorkspace: document.querySelector("#assistant-workspace"),
   assistantTaskCard: document.querySelector("#assistant-task-card"),
-  assistantStepList: document.querySelector("#assistant-step-list"),
   planPreview: document.querySelector("#plan-preview"),
   planTask: document.querySelector("#plan-task"),
   applySelectedSteps: document.querySelector("#apply-selected-steps"),
@@ -65,7 +64,6 @@ const elements = {
   clearAll: document.querySelector("#clear-all"),
   taskList: document.querySelector("#task-list"),
   completedList: document.querySelector("#completed-list"),
-  suggestionCard: document.querySelector("#suggestion-card"),
   pickNextStep: document.querySelector("#pick-next-step"),
   energyOptions: document.querySelectorAll(".energy-option"),
   durationOptions: document.querySelectorAll(".duration-option"),
@@ -81,16 +79,7 @@ const elements = {
   switchTask: document.querySelector("#switch-task"),
   doneForNow: document.querySelector("#done-for-now"),
   completeCopy: document.querySelector("#complete-copy"),
-  todaySteps: document.querySelector("#today-steps"),
-  todaySprints: document.querySelector("#today-sprints"),
-  momentumNote: document.querySelector("#momentum-note"),
-  returnCount: document.querySelector("#return-count"),
-  openLoops: document.querySelector("#open-loops"),
-  historyLog: document.querySelector("#history-log"),
   taskTemplate: document.querySelector("#task-card-template"),
-  aiStatusCopy: document.querySelector("#ai-status-copy"),
-  coachMessage: document.querySelector("#coach-message"),
-  coachInsight: document.querySelector("#coach-insight"),
   chatThread: document.querySelector("#chat-thread"),
   chatForm: document.querySelector("#chat-form"),
   chatInput: document.querySelector("#chat-input"),
@@ -178,7 +167,7 @@ function bindEvents() {
     renderDraftPreview();
     saveState();
   });
-  elements.pickNextStep.addEventListener("click", () => {
+  elements.pickNextStep?.addEventListener("click", () => {
     void handlePickNextStep();
   });
   elements.chatForm.addEventListener("submit", (event) => {
@@ -213,7 +202,7 @@ function bindEvents() {
       syncEnergySelections();
 
       if (canUseAI()) {
-        state.ai.statusText = `AI guide ready on ${state.ai.model}. Refresh guidance whenever you want a new read.`;
+        state.ai.statusText = `AI guide ready on ${state.ai.model}.`;
       }
 
       saveState();
@@ -887,24 +876,14 @@ function render() {
   syncTimerSelections();
   syncAssistantSelection();
   renderDraftPreview();
-  renderAiPanel();
   renderAssistantPanel();
   renderChatThread();
   renderTasks();
   renderCompletedTasks();
-  renderSuggestion();
   renderTimerTarget();
   renderTimerStatus();
-  renderHistory();
-  renderHeaderStats();
   updateTimerDisplay();
   toggleBusyState();
-}
-
-function renderAiPanel() {
-  elements.aiStatusCopy.textContent = state.ai.statusText;
-  elements.coachMessage.textContent = state.ai.coachMessage;
-  elements.coachInsight.textContent = state.ai.insight;
 }
 
 function renderAssistantPanel() {
@@ -919,13 +898,11 @@ function renderAssistantPanel() {
 
   if (!hasTask) {
     elements.assistantTaskCard.innerHTML = "";
-    elements.assistantStepList.innerHTML = "";
     elements.planPreview.innerHTML = "<p>No task selected.</p>";
     return;
   }
 
   renderAssistantTaskCard(task);
-  renderAssistantStepList(task);
   renderPlanPreview(task);
 }
 
@@ -936,29 +913,6 @@ function renderAssistantTaskCard(task) {
     <h3>${escapeHtml(task.title)}</h3>
     <p>${openStepCount} open step${openStepCount === 1 ? "" : "s"} on this task.</p>
   `;
-}
-
-function renderAssistantStepList(task) {
-  const openSteps = getOpenSteps(task);
-
-  if (!openSteps.length) {
-    elements.assistantStepList.className = "assistant-step-list empty-state";
-    elements.assistantStepList.innerHTML = "<p>This task has no open steps.</p>";
-    return;
-  }
-
-  elements.assistantStepList.className = "assistant-step-list";
-  elements.assistantStepList.innerHTML = "";
-
-  openSteps.forEach((step) => {
-    const item = document.createElement("div");
-    item.className = "assistant-step-item";
-    item.innerHTML = `
-      <p>${escapeHtml(step.title)}</p>
-      <span>${labelEffort(step.effort)} lift • ${step.minutes} min</span>
-    `;
-    elements.assistantStepList.append(item);
-  });
 }
 
 function renderPlanPreview(task) {
@@ -974,14 +928,6 @@ function renderPlanPreview(task) {
 
   elements.planPreview.className = "plan-preview";
   elements.planPreview.innerHTML = "";
-
-  const summary = document.createElement("div");
-  summary.className = "plan-summary";
-  summary.innerHTML = `
-    <p class="plan-summary-title">${escapeHtml(draft.summary)}</p>
-    <p>${escapeHtml(draft.coachMessage)}</p>
-  `;
-  elements.planPreview.append(summary);
 
   draft.suggestedSteps.forEach((step, index) => {
     const row = document.createElement("label");
@@ -1032,7 +978,7 @@ function renderChatThread() {
 
     const label = document.createElement("p");
     label.className = "chat-role";
-    label.textContent = message.role === "user" ? "You" : "Coach";
+    label.textContent = message.role === "user" ? "You" : "Assistant";
 
     const text = document.createElement("p");
     text.className = "chat-text";
@@ -1669,6 +1615,10 @@ function removeTaskPermanently(taskId) {
 }
 
 function renderSuggestion() {
+  if (!elements.suggestionCard) {
+    return;
+  }
+
   const focusedTask = getFocusedTask();
   const focusedStep = getFocusedStep();
   const suggestion = focusedTask && focusedStep
@@ -1963,6 +1913,10 @@ function recordHistory(type, summary, taskTitle = null) {
 }
 
 function renderHistory() {
+  if (!elements.historyLog) {
+    return;
+  }
+
   const returnCount = state.history.filter((item) => item.type === "reset").length;
   const openLoops = state.tasks.reduce((count, task) => count + getOpenSteps(task).length, 0);
 
@@ -1996,6 +1950,10 @@ function renderHistory() {
 }
 
 function renderHeaderStats() {
+  if (!elements.todaySteps || !elements.todaySprints || !elements.momentumNote) {
+    return;
+  }
+
   const today = new Date().toDateString();
   const completedStepsToday = state.tasks
     .flatMap((task) => task.steps)
@@ -2042,7 +2000,9 @@ function toggleBusyState() {
   const hasSelectedTask = Boolean(getSelectedAssistantTask());
   const hasDraft = Boolean(getPlanDraft(state.assistant.selectedTaskId));
   elements.generatePlan.disabled = disabled;
-  elements.pickNextStep.disabled = disabled;
+  if (elements.pickNextStep) {
+    elements.pickNextStep.disabled = disabled;
+  }
   elements.sendChat.disabled = disabled || !hasSelectedTask;
   elements.chatInput.disabled = disabled || !hasSelectedTask;
   elements.planTask.disabled = disabled || !hasSelectedTask;
@@ -2054,7 +2014,6 @@ function toggleBusyState() {
 function setAiLoading(message) {
   state.ai.isLoading = true;
   state.ai.statusText = message;
-  renderAiPanel();
   toggleBusyState();
 }
 
