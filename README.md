@@ -2,7 +2,7 @@
 
 Step Zero is a calm-composed, ADHD-friendly focus app for getting unstuck( under works) . You dump a messy list of tasks, keep a running list of active work, let AI turn that into smaller steps, and then use a selected-task assistant to chat about one task or preview a better step plan before applying it.
 
-## Current flow
+## flow as of today
 
 1. Drop your thoughts into the split brain dump workspace
 2. Watch tasks collect in the running list on the right
